@@ -1,5 +1,6 @@
 import os
 import time
+import random
 
 from PyQt6.QtWidgets import QWidget, QApplication, QLabel, QVBoxLayout
 from PyQt6.QtCore import Qt, QPoint, QTimer
@@ -61,9 +62,9 @@ class PetWindow(QWidget):
         pet_width = 170
         pet_height = 170
         
-        # 计算右下角位置 (减去一点边距)
-        x = screen.width() - pet_width - 100 
-        y = screen.height() - pet_height - 100
+        # 计算左下角位置 (加上一点边距)
+        x = screen.left() + 100 
+        y = screen.bottom() - pet_height - 100
         
         self.setGeometry(x, y, pet_width, pet_height)
         self.setWindowTitle('DigitMaid')
@@ -136,11 +137,6 @@ class PetWindow(QWidget):
             self.inactivity_timer.stop()
             self.inactivity_stage = 0
 
-        # 如果之前因为 special 而偏移过，并且现在切换成其他动作，直接复原位置
-        if action_name != "special" and getattr(self, 'special_origin_pos', None) is not None:
-            self.move(self.special_origin_pos)
-            self.special_origin_pos = None
-
         base_dir_rel = self.anim_cfg.get("base_dir", "resource/wisdel/可用素材")
         actions = self.anim_cfg.get("actions", {})
         loops = self.anim_cfg.get("loops", {})
@@ -159,6 +155,10 @@ class PetWindow(QWidget):
 
         if not gif_file:
             return
+
+        # 新增：允许在 yaml 里用逗号分隔配置多个动作，并在播放时随机抽取其中一个
+        if isinstance(gif_file, str) and "," in gif_file:
+            gif_file = random.choice([f.strip() for f in gif_file.split(",")])
 
         gif_path = os.path.join(self.root_dir, base_dir_rel, gif_file)
         if not os.path.exists(gif_path):
@@ -248,17 +248,14 @@ class PetWindow(QWidget):
             if getattr(self, '_is_preparing_special', False):
                 self._is_preparing_special = False
                 
-            # 双击发生0.5秒后，或者没双击过，按下鼠标时立刻打断特殊动作回到idle
-            if time.time() - getattr(self, '_last_double_click_time', 0) > 0.5:
-                if self.current_action != "idle":
-                    self.play_action("idle")
-            elif self.current_action == "idle":
-                # 如果当前本来就是idle，按下的瞬间暂停计时防挂机
+            # 按下的瞬间暂停计时防挂机
+            if self.current_action == "idle":
                 self.inactivity_timer.stop()
               
         elif event.button() == Qt.MouseButton.RightButton:
-            if getattr(self, '_is_preparing_special', False):
-                self._is_preparing_special = False
+            # 在 special 或者准备阶段忽略呼出菜单
+            if self.current_action == "special" or getattr(self, '_is_preparing_special', False):
+                return
                 
             # 菜单打开期间循环 interact
             self.menu_interact_mode = True
@@ -272,6 +269,10 @@ class PetWindow(QWidget):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            # 免疫 special 期间的双击操作
+            if self.current_action == "special":
+                return
+                
             # 记录双击发生的时间，并在接下来的0.5秒内免疫按下鼠标的打断
             self._last_double_click_time = time.time()
             self._is_double_click = True
@@ -281,16 +282,15 @@ class PetWindow(QWidget):
 
     def mouseMoveEvent(self, event):
         if event.buttons() & Qt.MouseButton.LeftButton:
-            # 如果处于特殊动作准备阶段（向右平移），只要用户一拖拽立马打断准备过程
+            # 如果处于特殊动作准备阶段（向右平移），只要用户一拖拽立马打断
             if getattr(self, '_is_preparing_special', False):
                 self._is_preparing_special = False
                 
-            # 只有双击0.5秒后的拖动才被认为是真实的拖拽互动，立刻打断变为move
+            # 只有双击0.5秒后的拖动才被认为是真实的拖拽互动，立刻打断动作变为move
             if time.time() - getattr(self, '_last_double_click_time', 0) > 0.5:
                 self._is_dragging = True
                 if self.current_action != "move":
                     self.play_action("move")
-                self._reset_inactivity_timer()
                 
                 # 计算拖拽位置
                 new_pos = event.globalPosition().toPoint() - self.offset
@@ -314,9 +314,9 @@ class PetWindow(QWidget):
                 if self.current_action == "move":
                     self.play_action("idle")
             else:
-                # 真正的单击操作：松开鼠标且没有拖拽，打断一切动作回到 idle
-                if self.current_action != "idle":
-                    self.play_action("idle")
+                # 只是单击且没有拖动，恢复计时器（如果是从 idle 点下去的）
+                if self.current_action == "idle" and hasattr(self, 'inactivity_timer'):
+                    self._reset_inactivity_timer()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
