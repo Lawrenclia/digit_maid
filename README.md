@@ -71,3 +71,7 @@ python src/core/run.py
 *   `src/function/open_app.py`: 打开常用软件逻辑 (App Launcher)。
 *   `src/function/screen_shot.py`: 屏幕截图逻辑 (Screenshot Tool)。
 *   `resource/`: 资源存放目录 (Resources)。
+
+## 软件打开说明
+
+*目前打开软件需要

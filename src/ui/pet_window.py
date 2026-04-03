@@ -49,6 +49,11 @@ class PetWindow(QWidget):
         self.inactivity_timer.setSingleShot(True)
         self.inactivity_timer.timeout.connect(self._on_inactivity_timeout)
 
+        # 闲置散步计时器
+        self.wander_timer = QTimer(self)
+        self.wander_timer.timeout.connect(self._on_wander_tick)
+        self.wander_speed = 0
+
         self.play_action("idle")
         self._reset_inactivity_timer()
 
@@ -64,7 +69,7 @@ class PetWindow(QWidget):
         
         # 计算左下角位置 (加上一点边距)
         x = screen.left() + 100 
-        y = screen.bottom() - pet_height - 100
+        y = screen.bottom() - pet_height
         
         self.setGeometry(x, y, pet_width, pet_height)
         self.setWindowTitle('DigitMaid')
@@ -131,7 +136,7 @@ class PetWindow(QWidget):
             print(f"读取动作配置失败: {e}")
             return {}
 
-    def play_action(self, action_name, force_loop=None, is_flipped=False):
+    def play_action(self, action_name, force_loop=None, is_flipped=None):
         # 只要切换动作，就先暂停待机计时；如果是回到 idle，再重新开始计时
         if hasattr(self, 'inactivity_timer'):
             self.inactivity_timer.stop()
@@ -205,7 +210,10 @@ class PetWindow(QWidget):
         
         self.current_action = action_name
         self.current_movie = movie
-        self.is_flipped = is_flipped
+        if is_flipped is not None:
+            self.is_flipped = is_flipped
+        else:
+            self.is_flipped = getattr(self, "is_flipped", False)
         
         if not self.is_flipped:
             self.pet_label.setMovie(movie)
@@ -249,18 +257,65 @@ class PetWindow(QWidget):
             # 非循环动作结束后回到 idle，play_action 内部会自动接管并重新启动计时器
             self.play_action("idle")
 
+    def _on_wander_tick(self):
+        if self.current_action != "move" or self.inactivity_stage != 1:
+            self.wander_timer.stop()
+            return
+
+        new_x = self.x() + self.wander_speed
+        screen_geo = self.screen().availableGeometry()
+        
+        start_x = getattr(self, 'wander_start_x', self.x())
+        
+        # 碰到屏幕边缘或者超出50像素则转身
+        if new_x < screen_geo.left() or new_x < start_x - 50:
+            new_x = max(screen_geo.left(), start_x - 50)
+            self.wander_speed *= -1
+            self.is_flipped = False
+            if self.current_movie:
+                self.pet_label.setMovie(self.current_movie)
+        elif new_x + self.width() > screen_geo.right() or new_x > start_x + 50:
+            new_x = min(screen_geo.right() - self.width(), start_x + 50)
+            self.wander_speed *= -1
+            self.is_flipped = True
+            if self.current_movie:
+                pixmap = self.current_movie.currentPixmap()
+                if not pixmap.isNull():
+                    transform = QTransform().scale(-1, 1)
+                    self.pet_label.setPixmap(pixmap.transformed(transform))
+            
+        self.move(new_x, self.y())
+
     def _reset_inactivity_timer(self):
         self.inactivity_stage = 0
-        self.inactivity_timer.start(15000)#15秒以后进入坐姿
+        self.inactivity_timer.start(15000)#15秒以后进入水平move
 
     def _on_inactivity_timeout(self):
         if self.inactivity_stage == 0:
-            self.play_action("sit")
+            # 15s无互动：播放 move 动作
+            # 随机决定初次散步方向：-1为向左走，1为向右走
+            direction = random.choice([-1, 1])
+            self.wander_speed = direction * 2  # 速度可适度调整
+            self.wander_start_x = self.x()     # 记录散步起点
+            
+            # 向左走(direction < 0)时进行翻转
+            self.play_action("move", is_flipped=(direction < 0))
             self.inactivity_stage = 1
-            self.inactivity_timer.start(15000)#又15秒以后进入躺姿
+            self.inactivity_timer.start(15000)#再15秒以后进入坐姿
+            self.wander_timer.start(50)       # 开启散步定时器 (50ms)
         elif self.inactivity_stage == 1:
-            self.play_action("sleep")
+            # 停止散步
+            self.wander_timer.stop()
+            # 播放 sit
+            self.move(self.x(), self.y() + 10)
+            self.play_action("sit")
             self.inactivity_stage = 2
+            self.inactivity_timer.start(15000)#再15秒以后进入躺姿
+        elif self.inactivity_stage == 2:
+            # 播放 sleep
+            self.move(self.x() - 10, self.y() + 10)
+            self.play_action("sleep")
+            self.inactivity_stage = 3
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -289,6 +344,9 @@ class PetWindow(QWidget):
             # 菜单关闭后恢复 idle
             self.menu_interact_mode = False
             self.play_action("idle")
+            
+            # 手动置顶，防止因为其他程序的出现掉出最上层
+            self.force_on_top()
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -350,6 +408,12 @@ class PetWindow(QWidget):
                 # 只是单击且没有拖动，恢复计时器（如果是从 idle 点下去的）
                 if self.current_action == "idle" and hasattr(self, 'inactivity_timer'):
                     self._reset_inactivity_timer()
+
+    def force_on_top(self):
+        """强制将窗口保持在屏幕最顶层"""
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        self.show()
+        self.raise_()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

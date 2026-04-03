@@ -4,53 +4,64 @@ import pyautogui
 from datetime import datetime
 import platform
 
+def load_app_paths():
+    """解析简单的 YAML 文件读取应用路径配置"""
+    config_path = os.path.join(os.path.dirname(__file__), "apps.yaml")
+    apps = {}
+    if not os.path.exists(config_path):
+        return apps
+        
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            current_app = None
+            for line in f:
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#") or stripped == "app_paths:":
+                    continue
+                # 解析 key: (缩进2格)
+                if line.startswith("  ") and not line.startswith("    "):
+                    current_app = stripped.replace(":", "").strip()
+                    apps[current_app] = []
+                # 解析 value: (缩进4格的 - )
+                elif line.startswith("    - ") and current_app is not None:
+                    # 获取破折号后面的路径并去除两端空格和引号
+                    path = stripped[2:].strip().strip("'\"")
+                    apps[current_app].append(path)
+    except Exception as e:
+        print(f"读取 apps.yaml 失败: {e}")
+    return apps
+
 def open_application(app_name):
     """
     根据名称打开应用程序。
-    简单的名称匹配。
+    从 apps.yaml 中读取配置。
     """
     app_name = app_name.lower()
     system = platform.system()
     
     try:
         if system == "Windows":
-            if "calc" in app_name or "计算器" in app_name:
-                subprocess.Popen("calc.exe")
-                return "已打开计算器"
-            elif "notepad" in app_name or "记事本" in app_name:
-                subprocess.Popen("notepad.exe")
-                return "已打开记事本"
-            elif "cmd" in app_name or "终端" in app_name:
-                subprocess.Popen("cmd.exe")
-                return "已打开命令行"
-            elif "explorer" in app_name or "资源管理器" in app_name:
-                subprocess.Popen("explorer.exe")
-                return "已打开资源管理器"
-            elif "网易云" in app_name or "music" in app_name:
-                try:
-                    # 尝试直接通过注册的名称启动
-                    subprocess.Popen("cloudmusic.exe") 
-                    return "已打开网易云音乐"
-                except FileNotFoundError:
-                    # 尝试常见安装路径
-                    common_paths = [
-                        r"C:\Program Files (x86)\Netease\CloudMusic\cloudmusic.exe",
-                        r"C:\Program Files\Netease\CloudMusic\cloudmusic.exe",
-                        r"D:\Program Files (x86)\Netease\CloudMusic\cloudmusic.exe",
-                        r"C:\Netease\CloudMusic\cloudmusic.exe"
-                    ]
-                    for path in common_paths:
-                        if os.path.exists(path):
-                            subprocess.Popen(path)
-                            return "已打开网易云音乐"
-                    return "未找到网易云音乐，请确认安装位置"
-            else:
-                # 尝试直接运行命令
-                try:
-                    subprocess.Popen(app_name)
-                    return f"尝试启动 {app_name}"
-                except FileNotFoundError:
-                    return f"找不到应用: {app_name}"
+            app_configs = load_app_paths()
+            
+            # 遍历配置文件中的关键词
+            for keyword, paths in app_configs.items():
+                if keyword.lower() in app_name:
+                    for path in paths:
+                        # 对于不需要完整路径的系统命令（如 calc.exe等），直接尝试启动
+                        if os.path.exists(path) or "\\" not in path:
+                            try:
+                                subprocess.Popen(path)
+                                return f"已打开{keyword}"
+                            except FileNotFoundError:
+                                continue
+                    return f"未找到{keyword}，请确认 apps.yaml 中的安装位置"
+            
+            # 如果配置文件中没找到，尝试直接运行命令
+            try:
+                subprocess.Popen(app_name)
+                return f"尝试启动 {app_name}"
+            except FileNotFoundError:
+                return f"找不到应用: {app_name}"
         else:
             return "当前仅支持 Windows 系统的简单应用启动"
             

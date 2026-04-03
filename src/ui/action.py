@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QMenu, QApplication
 from PyQt6.QtGui import QAction
 import sys
 import os
+import time
 
 # 导入功能模块
 # 为了方便导入，可以在这里临时添加一下路径，或者在 main 中处理
@@ -21,7 +22,7 @@ class PetActions:
         # 打开常用软件子菜单
         app_menu = menu.addMenu("打开软件")
         
-        apps = ["计算器", "记事本", "终端", "网易云"]
+        apps = ["鹰角启动！","计算器", "记事本", "终端", "网易云"]
         for app in apps:
             action = QAction(app, self.parent)
             action.triggered.connect(lambda checked, a=app: self.do_open_app(a))
@@ -56,10 +57,23 @@ class PetActions:
 
         print(f"正在识别屏幕... 保存到: {choice}")
         
-        # 2. 执行截图
-        # 为防止弹出框还在屏幕上，先隐藏自己或者延迟一下？
-        # 一般 msg_box.exec() 也是阻塞的，结束后窗口就已经关闭了，所以直接截图应该没问题。
+        # 2. 为了防止截图带上桌宠自己，先将桌宠隐藏并刷新页面缓冲
+        self.parent.hide()
+        QApplication.processEvents()
+        
+        # 可选等待一小下，确保窗口完全从屏幕清除了视觉残留
+        time.sleep(0.2)
+        
+        # 执行截图
         result = screen_shot.capture_screen_content(save_dir=save_path)
+        
+        # 截完图重新显示回来并置顶
+        if hasattr(self.parent, "force_on_top"):
+            self.parent.force_on_top()
+        else:
+            self.parent.show()
+            self.parent.raise_()
+        
         print(result)
         self.dialogue.show_message("屏幕截图", result)
 

@@ -3,7 +3,7 @@
 # 2) loops:   每个 action 是否循环播放（true/false）
 # 3) base_dir: gif 所在目录（相对项目根目录）
 
-base_dir: resource/wisdel/可用素材
+base_dir: resource/wisdel/皮肤素材/可用素材
 
 actions:
   idle: relax.gif
