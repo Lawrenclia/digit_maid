@@ -59,7 +59,10 @@ class PetWindow(QWidget):
         self.topmost_timer.timeout.connect(self._keep_on_top)
         self.topmost_timer.start(500)  # 每半秒置顶一次
 
-        self.play_action("idle")
+        # 先播放 start 动画（若配置不存在则会在底层 fallback 到 idle 或返回 False）
+        if not self.play_action("start", force_loop=False):
+            self.play_action("idle")
+            
         self._reset_inactivity_timer()
 
     def _keep_on_top(self):
@@ -176,7 +179,7 @@ class PetWindow(QWidget):
             loop_value = action_cfg.get("loop", True)
 
         if not gif_file:
-            return
+            return False
 
         # 新增：允许在 yaml 里用逗号分隔配置多个动作，并在播放时随机抽取其中一个
         if isinstance(gif_file, str) and "," in gif_file:
@@ -185,7 +188,7 @@ class PetWindow(QWidget):
         gif_path = os.path.join(self.root_dir, base_dir_rel, gif_file)
         if not os.path.exists(gif_path):
             print(f"动作素材不存在: {gif_path}")
-            return
+            return False
 
         if self.current_movie is not None:
             self.current_movie.stop()
@@ -199,14 +202,21 @@ class PetWindow(QWidget):
         frame_size = movie.currentImage().size()
         if not frame_size.isEmpty():
             current_pos = self.pos()
+            old_width = self.width()
+            old_height = self.height()
             screen_geo = self.screen().availableGeometry()
             
             target_width = frame_size.width() // 2
             target_height = frame_size.height() // 2
             
-            # 尝试保持当前左上角，但如果右下角超出屏幕则向左/向上挤
-            new_x = current_pos.x()
-            new_y = current_pos.y()
+            # 保持桌宠的左下角不发生偏移（防止不同宽高且大小不一的动作导致位置乱跳）
+            left_x = current_pos.x()
+            bottom_y = current_pos.y() + old_height
+            
+            new_x = left_x
+            new_y = bottom_y - target_height
+            
+            # 如果右下角超出屏幕则向左/向上挤
             if new_x + target_width > screen_geo.right():
                 new_x = screen_geo.right() - target_width
             if new_y + target_height > screen_geo.bottom() + 10:
@@ -249,6 +259,8 @@ class PetWindow(QWidget):
         # 只有在 idle 状态下才允许计时器流动
         if action_name == "idle" and hasattr(self, 'inactivity_timer'):
             self._reset_inactivity_timer()
+            
+        return True
 
     def _on_frame_changed(self, frame_number):
         if self.current_movie is None:
@@ -273,8 +285,11 @@ class PetWindow(QWidget):
             if self.current_movie is not None:
                 self.current_movie.start()
         else:
-            # 非循环动作结束后回到 idle，play_action 内部会自动接管并重新启动计时器
-            self.play_action("idle")
+            if getattr(self, "is_dying", False):
+                QApplication.instance().quit()
+            else:
+                # 非循环动作结束后回到 idle，play_action 内部会自动接管并重新启动计时器
+                self.play_action("idle")
 
     def _on_wander_tick(self):
         if self.current_action != "move" or self.inactivity_stage != 1:
@@ -326,13 +341,13 @@ class PetWindow(QWidget):
             # 停止散步
             self.wander_timer.stop()
             # 播放 sit
-            self.move(self.x(), self.y() + 10)
+            self.move(self.x(), self.y() + 30)
             self.play_action("sit")
             self.inactivity_stage = 2
             self.inactivity_timer.start(15000)#再15秒以后进入躺姿
         elif self.inactivity_stage == 2:
             # 播放 sleep
-            self.move(self.x() - 10, self.y() + 10)
+            self.move(self.x() - 10, self.y() + 20)
             self.play_action("sleep")
             self.inactivity_stage = 0
             self.inactivity_timer.start(45000)

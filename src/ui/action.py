@@ -100,7 +100,7 @@ class PetActions:
         menu.addAction(action_startup)
         
         action_quit = QAction('退出', self.parent)
-        action_quit.triggered.connect(QApplication.instance().quit)
+        action_quit.triggered.connect(self.trigger_quit)
         menu.addAction(action_quit)
 
         # 添加 15 秒无操作自动关闭
@@ -151,7 +151,7 @@ class PetActions:
             {'label': 'APP', 'action': app_sub_items},
             {'label': '截图', 'action': screenshot_sub_items},
             {'label': "设置", 'action': setting_label},
-            {'label': '退出', 'action': QApplication.instance().quit}
+            {'label': '退出', 'action': self.trigger_quit}
         ]
         
         # 把中心点设在桌宠的正上方一点或正中心
@@ -259,6 +259,18 @@ class PetActions:
             
         # 使用 QTimer.singleShot 代替 time.sleep(0.2)
         QTimer.singleShot(300, capture_and_restore)
+
+    def trigger_quit(self):
+        """播放退出动画后再退出程序"""
+        if getattr(self.parent, "is_dying", False):
+            return
+            
+        self.parent.is_dying = True
+        
+        # 尝试播放 die 动画，如果不成功（缺少配置或文件）则直接退出
+        success = self.parent.play_action("die", force_loop=False)
+        if not success:
+            QApplication.instance().quit()
 
     def do_open_app(self, app_name):
         self.parent.play_action("open_app")
