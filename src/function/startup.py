@@ -28,7 +28,8 @@ def is_startup_enabled():
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY_PATH, 0, winreg.KEY_READ) as key:
             value, _ = winreg.QueryValueEx(key, APP_NAME)
-            return bool(value and str(value).strip())
+            expected = _build_startup_command()
+            return bool(value and str(value).strip().lower() == expected.lower())
     except FileNotFoundError:
         return False
     except OSError:
