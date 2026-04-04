@@ -189,8 +189,10 @@ class PetWindow(QWidget):
 
         if self.current_movie is not None:
             self.current_movie.stop()
+            self.current_movie.deleteLater()
 
-        movie = QMovie(gif_path)
+        # 指定 parent 为 self，防止意外的垃圾回收崩溃
+        movie = QMovie(gif_path, parent=self)
         movie.jumpToFrame(0)
 
         # 获取 GIF 原始像素，缩放一倍显示
@@ -370,6 +372,11 @@ class PetWindow(QWidget):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            # 防止双击过快导致资源不停创建销毁引发闪退，增加0.5秒冷却
+            current_time = time.time()
+            if hasattr(self, '_last_double_click_time') and current_time - self._last_double_click_time < 0.5:
+                return
+
             # 双击交互打断对话框
             self.dialogue_system.hide_dialogue()
             
@@ -378,7 +385,7 @@ class PetWindow(QWidget):
                 return
                 
             # 记录双击发生的时间，并在接下来的0.5秒内免疫按下鼠标的打断
-            self._last_double_click_time = time.time()
+            self._last_double_click_time = current_time
             self._is_double_click = True
             self.play_action("special", force_loop=False)
         else:
