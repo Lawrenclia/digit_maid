@@ -54,8 +54,25 @@ class PetWindow(QWidget):
         self.wander_timer.timeout.connect(self._on_wander_tick)
         self.wander_speed = 0
 
+        # 定时强制置顶计时器，避免被网页全屏等其他抢占焦点的程序压在下方
+        self.topmost_timer = QTimer(self)
+        self.topmost_timer.timeout.connect(self._keep_on_top)
+        self.topmost_timer.start(500)  # 每半秒置顶一次
+
         self.play_action("idle")
         self._reset_inactivity_timer()
+
+    def _keep_on_top(self):
+        # 仅提升Z轴顺序，不窃取焦点，避免影响用户打字
+        self.raise_()
+
+    def force_on_top(self):
+        # 强制窗口置顶，应对截图后或是被其他软件抢占焦点后层级丢失
+        flags = self.windowFlags()
+        self.setWindowFlags(flags | Qt.WindowType.WindowStaysOnTopHint)
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def initUI(self):
         # ... (保持不变)
