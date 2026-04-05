@@ -113,6 +113,8 @@ class PetWindow(QWidget):
 
             cfg = {
                 "base_dir": "resource/wisdel/皮肤素材/可用素材",
+                "fall_mode": "smooth",
+                "smooth_fall": True,
                 "actions": {},
                 "loops": {},
                 # 向后兼容旧结构 animations: {action: {file, loop}}
@@ -128,6 +130,17 @@ class PetWindow(QWidget):
 
                 if raw.startswith("base_dir:"):
                     cfg["base_dir"] = raw.split(":", 1)[1].strip()
+                    continue
+
+                if raw.startswith("fall_mode:"):
+                    mode = raw.split(":", 1)[1].strip().lower()
+                    if mode in ("smooth", "direct", "none"):
+                        cfg["fall_mode"] = mode
+                    continue
+
+                if raw.startswith("smooth_fall:"):
+                    value = raw.split(":", 1)[1].strip().lower()
+                    cfg["smooth_fall"] = value in ("true", "1", "yes", "on")
                     continue
 
                 if line in ("actions:", "loops:", "animations:"):
@@ -169,7 +182,7 @@ class PetWindow(QWidget):
 
     def play_action(self, action_name, force_loop=None, is_flipped=None):
         # 空中不进入 idle，避免在未落地时提前触发待机计时
-        if action_name == "idle" and not self._is_at_bottom_boundary(tolerance=0):
+        if action_name == "idle" and self._get_fall_mode() != "none" and not self._is_at_bottom_boundary(tolerance=0):
             return False
 
         # 只要切换动作，就先暂停待机计时；如果是回到 idle，再重新开始计时
@@ -304,6 +317,15 @@ class PetWindow(QWidget):
                 self._on_action_finished()
 
     def _on_action_finished(self):
+        # 菜单打开期间锁定为 interact，避免动作结束后误回 idle
+        if getattr(self, "menu_interact_mode", False):
+            self._stop_inactivity_timer(reset_stage=True)
+            if self.current_action != "interact":
+                self.play_action("interact", force_loop=True)
+            elif self.current_movie is not None:
+                self.current_movie.start()
+            return
+
         # 下落阶段若动作结束，保持 fly 直到真正落地
         if self._is_falling and not self._is_at_bottom_boundary(tolerance=0):
             if self.current_action != "fly":
@@ -376,6 +398,13 @@ class PetWindow(QWidget):
 
         self._inactivity_deadline = None
 
+        # 菜单打开期间不进入 idle/sit/sleep 状态机，保持 interact
+        if getattr(self, "menu_interact_mode", False):
+            self._stop_inactivity_timer(reset_stage=True)
+            if self.current_action != "interact":
+                self.play_action("interact", force_loop=True)
+            return
+
         if self.inactivity_stage == 0:
             # 15s无互动：播放 move 动作
             # 随机决定初次散步方向：-1为向左走，1为向右走
@@ -412,12 +441,33 @@ class PetWindow(QWidget):
             y = self.y()
         return y >= self._bottom_y_limit() - tolerance
 
+    def _get_fall_mode(self):
+        mode = str(self.anim_cfg.get("fall_mode", "")).strip().lower()
+        if mode in ("smooth", "direct", "none"):
+            return mode
+        # 兼容旧配置 smooth_fall
+        return "smooth" if self.anim_cfg.get("smooth_fall", True) else "direct"
+
+    def _allow_air_interaction(self):
+        return self._get_fall_mode() == "none"
+
     def _stop_fall(self):
         if self._fall_timer.isActive():
             self._fall_timer.stop()
         self._is_falling = False
 
     def _start_fall_to_bottom(self):
+        mode = self._get_fall_mode()
+
+        if mode == "none":
+            # 不下坠模式：空中直接恢复 idle，并正常记录 idle 时间
+            self._stop_fall()
+            if self.current_action != "idle":
+                self.play_action("idle")
+            elif hasattr(self, 'inactivity_timer'):
+                self._reset_inactivity_timer()
+            return
+
         target_y = self._bottom_y_limit()
         if self.y() >= target_y:
             self.move(self.x(), target_y)
@@ -433,12 +483,20 @@ class PetWindow(QWidget):
         if self.current_action != "fly":
             self.play_action("fly", force_loop=True)
 
-        # 树叶式下落参数：左右摆动 + 轻微漂移 + 速度渐变
+        # 统一初始化下落坐标，具体下落模式由 smooth_fall 配置决定
         self._fall_x = float(self.x())
         self._fall_y = float(self.y())
         self._fall_start_y = self._fall_y
         self._fall_distance = max(1.0, float(target_y) - self._fall_start_y)
         self._fall_tick = 0
+
+        if mode == "direct":
+            # 非缓降：直落，不做横向摆动
+            self._fall_vertical_speed = random.uniform(6.0, 9.0)
+            self._fall_timer.start(16)
+            return
+
+        # 缓降：树叶式下落参数（左右摆动 + 轻微漂移 + 速度渐变）
         self._fall_vertical_speed = random.uniform(0.65, 1.15)
         self._fall_vertical_accel = random.uniform(0.02, 0.045)
         self._fall_vertical_max_speed = random.uniform(2.2, 3.0)
@@ -449,10 +507,27 @@ class PetWindow(QWidget):
         self._fall_timer.start(24)
 
     def _on_fall_tick(self):
+        mode = self._get_fall_mode()
+
+        if mode == "none":
+            self._stop_fall()
+            if self.current_action != "idle":
+                self.play_action("idle")
+            return
+
         target_y = self._bottom_y_limit()
         if self._fall_y >= target_y:
             self.move(self.x(), int(round(target_y)))
             if self._is_at_bottom_boundary(tolerance=0):
+                self._stop_fall()
+                self.play_action("idle")
+            return
+
+        if mode == "direct":
+            # 非缓降：快速直落，落地后进入 idle
+            self._fall_y = min(float(target_y), self._fall_y + self._fall_vertical_speed)
+            self.move(self.x(), int(round(self._fall_y)))
+            if self._fall_y >= target_y and self._is_at_bottom_boundary(tolerance=0):
                 self._stop_fall()
                 self.play_action("idle")
             return
@@ -507,7 +582,7 @@ class PetWindow(QWidget):
                 self._stop_inactivity_timer()
               
         elif event.button() == Qt.MouseButton.RightButton:
-            if not self._is_at_bottom_boundary():
+            if not self._is_at_bottom_boundary() and not self._allow_air_interaction():
                 return
 
             # 右击也可以关闭当前弹出的提示气泡
@@ -526,7 +601,7 @@ class PetWindow(QWidget):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if not self._is_at_bottom_boundary():
+            if not self._is_at_bottom_boundary() and not self._allow_air_interaction():
                 return
 
             # 防止双击过快导致资源不停创建销毁引发闪退，增加0.5秒冷却
