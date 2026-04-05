@@ -125,7 +125,7 @@ class PetActions:
         # 构造“打开软件”子菜单的数据
         app_sub_items = [
             {'label': app, 'action': lambda a=app: self.do_open_app(a)} 
-            for app in apps
+            for app in apps if app!="v2rayN"
         ]
 
         screenshot_sub_items = [
@@ -138,6 +138,7 @@ class PetActions:
         setting_label = [{'label': '关闭自启动' if startup.is_startup_enabled() else '开启自启动','action': self.toggle_startup}]
         top_items = [
             {'label': 'APP', 'action': app_sub_items},
+            {'label': 'v2rayN', 'action': lambda: self.do_open_app("v2rayN")},
             {'label': '截图', 'action': screenshot_sub_items},
             {'label': "设置", 'action': setting_label},
             {'label': '退出', 'action': self.trigger_quit}
@@ -260,11 +261,18 @@ class PetActions:
             QApplication.instance().quit()
 
     def do_open_app(self, app_name):
-        self.parent.play_action("open_app")
-        print(f"正在打开 {app_name}...")
-        result = open_app.open_application(app_name)
-        print(result)
-        self.dialogue.show_message("打开软件", result)
+        if app_name=="v2rayN":
+            self.parent.play_action("open_app")
+            print(f"正在启动 {app_name}...")
+            result = open_app.open_application(app_name)
+            print(result)
+            self.dialogue.show_message("启动VPN", result)
+        else:
+            self.parent.play_action("open_app")
+            print(f"正在启动 {app_name}...")
+            result = open_app.open_application(app_name)
+            print(result)
+            self.dialogue.show_message("打开软件", result)
 
     def toggle_startup(self, enabled=None):
         if enabled is None:

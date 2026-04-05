@@ -81,7 +81,7 @@ def open_application(app_name):
                         if os.path.exists(path) or "\\" not in path:
                             try:
                                 _launch_windows_app(path)
-                                return f"已打开{keyword}"
+                                return f"已启动{keyword}"
                             except FileNotFoundError:
                                 continue
                     return f"未找到{keyword}，请确认 apps.yaml 中的安装位置"
