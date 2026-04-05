@@ -7,9 +7,10 @@ from PyQt6.QtGui import QPainter, QColor, QPen, QPainterPath
 from .choice_dialog import load_dialog_theme
 
 class BubbleButton(QPushButton):
-    def __init__(self, text, is_back=False, icon_path=None, parent=None):
+    def __init__(self, text, is_back=False, icon_path=None, text_color="white", parent=None):
         super().__init__(text, parent)
         self.image_mode = False
+        self.text_color = text_color or "white"
         self.setFixedSize(70, 70)
         
         # 加载描边配置
@@ -20,12 +21,12 @@ class BubbleButton(QPushButton):
             self.image_mode = True
             self.setFixedSize(80, 80)
             bg_url = icon_path.replace("\\", "/")
-            text_color = "transparent" if self.enable_outline else "white"
+            display_color = "transparent" if self.enable_outline else self.text_color
             self.setStyleSheet(f"""
                 QPushButton {{
                     border-image: url('{bg_url}');
                     border: none;
-                    color: {text_color};
+                    color: {display_color};
                     font-weight: bold;
                     font-size: 15px;
                 }}
@@ -46,7 +47,7 @@ class BubbleButton(QPushButton):
         self.setStyleSheet(f"""
             QPushButton {{
                 background-color: {bg_color};
-                color: white;
+                color: {self.text_color};
                 border-radius: 35px;
                 font-weight: bold;
                 border: 4px solid {border_color};
@@ -137,24 +138,31 @@ class BubbleButton(QPushButton):
             
             path = QPainterPath()
             fm = painter.fontMetrics()
-            text_rect = fm.boundingRect(text)
+            lines = text.splitlines() if text else [""]
+            if not lines:
+                lines = [""]
             
             # 由于之前有 padding-top: 50px，我们把文字依然画到底部中间位置
             # 高度是 80，底部的空间大约是从 45 到 80。
             padding_top = 45
             area_height = rect.height() - padding_top
-            
-            x = (rect.width() - text_rect.width()) / 2.0
-            y = padding_top + (area_height + fm.ascent() - fm.descent()) / 2.0
-            
-            path.addText(QPointF(x, y), font, text)
+
+            line_height = fm.height()
+            total_height = line_height * len(lines)
+            start_y = padding_top + (area_height - total_height) / 2.0 + fm.ascent()
+
+            for idx, line in enumerate(lines):
+                line_width = fm.horizontalAdvance(line)
+                x = (rect.width() - line_width) / 2.0
+                y = start_y + idx * line_height
+                path.addText(QPointF(x, y), font, line)
             
             pen = QPen(QColor("black"))
             pen.setWidth(3)
             painter.setPen(pen)
             painter.drawPath(path)
             
-            painter.fillPath(path, QColor("white"))
+            painter.fillPath(path, QColor(self.text_color))
 
 class CircularMenuWidget(QWidget):
     def __init__(self, items, center_pos, on_close_callback=None, parent=None):
@@ -317,7 +325,13 @@ class CircularMenuWidget(QWidget):
                 else:
                     icon_path = self.select_btn_path
 
-            btn = BubbleButton(item['label'], is_back=is_special_btn, icon_path=icon_path, parent=self)
+            btn = BubbleButton(
+                item['label'],
+                is_back=is_special_btn,
+                icon_path=icon_path,
+                text_color=item.get('text_color', 'white'),
+                parent=self,
+            )
             
             # Target position
             tar_x = self.center_pos.x() + R * math.cos(angles[i]) - btn.width() / 2
