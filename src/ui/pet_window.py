@@ -200,7 +200,7 @@ class PetWindow(QWidget):
         movie = QMovie(gif_path, parent=self)
         movie.jumpToFrame(0)
 
-        # 获取 GIF 原始像素，缩放一倍显示
+        # 获取 GIF 原始像素，并按 base_render_scale * user_scale 进行缩放显示
         frame_size = movie.currentImage().size()
         if not frame_size.isEmpty():
             self._source_frame_size = QSize(frame_size.width(), frame_size.height())
