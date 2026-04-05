@@ -10,6 +10,8 @@ actions:
   interact: interact.gif
   special: special0.gif, special1.gif, jump.gif
   move: move.gif
+  sweat: sweat.gif
+  fly: fly.gif
   sit: sit.gif
   sleep: sleep.gif
   screenshot: sit.gif
@@ -22,6 +24,8 @@ loops:
   interact: false
   special: false
   move: true
+  sweat: true
+  fly: true
   sit: true
   sleep: true
   screenshot: false
