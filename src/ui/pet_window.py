@@ -4,7 +4,7 @@ import random
 import math
 
 from PyQt6.QtWidgets import QWidget, QApplication, QLabel, QVBoxLayout
-from PyQt6.QtCore import Qt, QPoint, QTimer, QSize
+from PyQt6.QtCore import Qt, QPoint, QTimer, QSize, QSettings
 from PyQt6.QtGui import QMovie, QTransform
 import sys
 
@@ -16,7 +16,7 @@ class PetWindow(QWidget):
     def __init__(self):
         super().__init__()
 
-        # 默认桌宠大小基准（缩放倍率为 1.0 时）
+        # 素材未加载时的初始窗口大小（真实显示大小由 GIF 帧尺寸决定）
         self.default_pet_width = 85
         self.default_pet_height = 85
         
@@ -52,7 +52,14 @@ class PetWindow(QWidget):
         self.min_user_scale = 0.2
         self.max_user_scale = 5.0
         self.scale_step = 0.1
+        self._load_persisted_user_scale()
         self._source_frame_size = None
+        self._custom_scale_adjusting = False
+        self._custom_scale_backup = self.user_scale
+        self._scale_preview_tip_timer = QTimer(self)
+        self._scale_preview_tip_timer.setSingleShot(True)
+        self._scale_preview_tip_timer.timeout.connect(self._on_scale_preview_stop)
+        self._scale_preview_tip_delay_ms = 450
 
         # 空闲状态机：15秒无交互进入 sit，再15秒无交互进入 sleep
         self.inactivity_stage = 0
@@ -191,6 +198,10 @@ class PetWindow(QWidget):
             return {}
 
     def play_action(self, action_name, force_loop=None, is_flipped=None):
+        # 预览调节期间禁止切到 idle，避免任何遗漏路径触发待机动作
+        if self._custom_scale_adjusting and action_name == "idle":
+            return False
+
         # 空中不进入 idle，避免在未落地时提前触发待机计时
         if action_name == "idle" and self._get_fall_mode() != "none" and not self._is_at_bottom_boundary(tolerance=0):
             return False
@@ -306,12 +317,119 @@ class PetWindow(QWidget):
         return True
 
     def _get_target_pet_size(self):
-        target_width = max(1, int(round(self.default_pet_width * self.user_scale)))
-        target_height = max(1, int(round(self.default_pet_height * self.user_scale)))
+        if self._source_frame_size is not None and not self._source_frame_size.isEmpty():
+            base_width = max(1, int(round(self._source_frame_size.width() * self.base_render_scale)))
+            base_height = max(1, int(round(self._source_frame_size.height() * self.base_render_scale)))
+        else:
+            base_width = self.default_pet_width
+            base_height = self.default_pet_height
+
+        target_width = max(1, int(round(base_width * self.user_scale)))
+        target_height = max(1, int(round(base_height * self.user_scale)))
         return target_width, target_height
 
     def _clamp_user_scale(self, value):
         return max(self.min_user_scale, min(self.max_user_scale, value))
+
+    def _load_persisted_user_scale(self):
+        settings = QSettings("DigitMaid", "DigitMaid")
+        saved_value = settings.value("ui/user_scale", self.user_scale)
+        try:
+            saved_scale = float(saved_value)
+        except (TypeError, ValueError):
+            saved_scale = self.user_scale
+        self.user_scale = self._clamp_user_scale(saved_scale)
+
+    def _save_persisted_user_scale(self):
+        settings = QSettings("DigitMaid", "DigitMaid")
+        settings.setValue("ui/user_scale", float(self.user_scale))
+        settings.sync()
+
+    def begin_custom_scale_adjustment(self):
+        if not self._custom_scale_adjusting:
+            self._custom_scale_backup = float(self.user_scale)
+        self._custom_scale_adjusting = True
+        self._scale_preview_tip_timer.stop()
+        self.wander_timer.stop()
+        self._stop_inactivity_timer(reset_stage=False)
+        if self._is_falling:
+            self._stop_fall()
+        return True, f"当前预览倍率: {self.user_scale:.1f}"
+
+    def confirm_custom_scale_adjustment(self):
+        if not self._custom_scale_adjusting:
+            return True, f"当前倍率: {self.user_scale:.1f}"
+        self._custom_scale_adjusting = False
+        self._scale_preview_tip_timer.stop()
+        self._custom_scale_backup = float(self.user_scale)
+        self._save_persisted_user_scale()
+        if not getattr(self, "menu_interact_mode", False) and self.current_action == "idle":
+            self._reset_inactivity_timer()
+        return True, f"已保存倍率: {self.user_scale:.1f}"
+
+    def cancel_custom_scale_adjustment(self):
+        if not self._custom_scale_adjusting:
+            return True, "已取消（没有未保存的自定义调整）"
+
+        self._custom_scale_adjusting = False
+        self._scale_preview_tip_timer.stop()
+        backup = float(self._custom_scale_backup)
+        ok, _ = self.set_pet_scale_factor(backup)
+        if not getattr(self, "menu_interact_mode", False) and self.current_action == "idle":
+            self._reset_inactivity_timer()
+        if ok:
+            return True, f"已恢复到未保存前的倍率: {self.user_scale:.1f}"
+        return False, "恢复大小失败"
+
+    def _schedule_scale_preview_tip(self):
+        if not self._custom_scale_adjusting:
+            return
+        self._scale_preview_tip_timer.start(self._scale_preview_tip_delay_ms)
+
+    def _on_scale_preview_stop(self):
+        if not self._custom_scale_adjusting:
+            return
+        if hasattr(self, "dialogue_system"):
+            self.dialogue_system.show_message("自定义大小", f"当前放大倍数: {self.user_scale:.1f}x")
+
+    def adjust_scale_by_wheel_delta(self, delta):
+        if not self._custom_scale_adjusting:
+            return False
+
+        if delta == 0:
+            return False
+
+        step_count = int(delta / 120)
+        if step_count == 0:
+            step_count = 1 if delta > 0 else -1
+
+        old_scale = self.user_scale
+        self.user_scale = self._clamp_user_scale(self.user_scale + step_count * self.scale_step)
+        if self.user_scale == old_scale:
+            return False
+
+        if self._apply_user_scale_to_current_movie():
+            self._sync_open_circular_menu_scale()
+            self._schedule_scale_preview_tip()
+            return True
+
+        ok, _ = self.set_pet_scale_factor(self.user_scale)
+        if ok:
+            self._sync_open_circular_menu_scale()
+            self._schedule_scale_preview_tip()
+        return ok
+
+    def _sync_open_circular_menu_scale(self):
+        actions = getattr(self, "pet_actions", None)
+        if actions is None:
+            return
+        menu = getattr(actions, "circular_menu", None)
+        if menu is None:
+            return
+        if not getattr(menu, "isVisible", lambda: False)():
+            return
+        if hasattr(menu, "sync_menu_scale_from_pet"):
+            menu.sync_menu_scale_from_pet()
 
     def set_pet_scale_factor(self, value):
         try:
@@ -321,6 +439,8 @@ class PetWindow(QWidget):
 
         self.user_scale = self._clamp_user_scale(target_scale)
         if self._apply_user_scale_to_current_movie():
+            if not self._custom_scale_adjusting:
+                self._save_persisted_user_scale()
             return True, f"当前大小: {self.width()}x{self.height()}，缩放倍数: {self.user_scale:.2f}"
 
         # 没有当前动画时，也按默认尺寸缩放窗口，保持设置即时生效
@@ -347,6 +467,8 @@ class PetWindow(QWidget):
             self.layout().activate()
         self.resize(target_width, target_height)
         self.move(new_x, new_y)
+        if not self._custom_scale_adjusting:
+            self._save_persisted_user_scale()
         return True, f"当前大小: {self.width()}x{self.height()}，缩放倍数: {self.user_scale:.2f}"
 
     def _apply_user_scale_to_current_movie(self):
@@ -401,6 +523,15 @@ class PetWindow(QWidget):
                 self._on_action_finished()
 
     def _on_action_finished(self):
+        if self._custom_scale_adjusting:
+            self._stop_inactivity_timer(reset_stage=True)
+            self.wander_timer.stop()
+            if self.current_action != "interact":
+                self.play_action("interact", force_loop=True)
+            elif self.current_movie is not None:
+                self.current_movie.start()
+            return
+
         # 菜单打开期间锁定为 interact，避免动作结束后误回 idle
         if getattr(self, "menu_interact_mode", False):
             self._stop_inactivity_timer(reset_stage=True)
@@ -429,6 +560,14 @@ class PetWindow(QWidget):
                     self.play_action("idle")
 
     def _on_wander_tick(self):
+        if getattr(self, "menu_interact_mode", False):
+            self.wander_timer.stop()
+            return
+
+        if self._custom_scale_adjusting:
+            self.wander_timer.stop()
+            return
+
         if self.current_action != "move" or self.inactivity_stage != 1:
             self.wander_timer.stop()
             return
@@ -462,6 +601,11 @@ class PetWindow(QWidget):
         self._start_inactivity_timer(15000) # 15秒以后进入水平move
 
     def _start_inactivity_timer(self, duration_ms):
+        if getattr(self, "menu_interact_mode", False) or self._custom_scale_adjusting:
+            self._inactivity_deadline = None
+            self.inactivity_timer.stop()
+            return
+
         self._inactivity_deadline = time.monotonic() + (duration_ms / 1000.0)
         self.inactivity_timer.start(duration_ms)
 
@@ -472,6 +616,10 @@ class PetWindow(QWidget):
             self.inactivity_stage = 0
 
     def _on_inactivity_timeout(self):
+        if self._custom_scale_adjusting:
+            self._stop_inactivity_timer(reset_stage=False)
+            return
+
         # 防止计时器在临界点被 stop/restart 后仍触发陈旧 timeout，误打断当前动作
         deadline = self._inactivity_deadline
         if deadline is None:
@@ -541,6 +689,10 @@ class PetWindow(QWidget):
         self._is_falling = False
 
     def _start_fall_to_bottom(self):
+        if self._custom_scale_adjusting:
+            self._stop_fall()
+            return
+
         mode = self._get_fall_mode()
 
         if mode == "none":
@@ -591,6 +743,10 @@ class PetWindow(QWidget):
         self._fall_timer.start(24)
 
     def _on_fall_tick(self):
+        if self._custom_scale_adjusting:
+            self._stop_fall()
+            return
+
         mode = self._get_fall_mode()
 
         if mode == "none":
@@ -650,6 +806,10 @@ class PetWindow(QWidget):
         self.move(int(round(new_x)), int(round(self._fall_y)))
 
     def mousePressEvent(self, event):
+        if self._custom_scale_adjusting:
+            event.ignore()
+            return
+
         if event.button() == Qt.MouseButton.LeftButton:
             # 当左键点击(准备拖拽或点击)时，如果有气泡菜单则关闭
             if hasattr(self.pet_actions, "circular_menu") and self.pet_actions.circular_menu is not None:
@@ -678,12 +838,19 @@ class PetWindow(QWidget):
                 
             # 菜单打开期间循环 interact
             self.menu_interact_mode = True
+            # 菜单打开期间彻底停止 idle 计时与散步计时
+            self._stop_inactivity_timer(reset_stage=True)
+            self.wander_timer.stop()
             self.play_action("interact", force_loop=True)
             
             # 委托 action 模块处理右键菜单
             self.pet_actions.show_context_menu(event.globalPosition().toPoint())
 
     def mouseDoubleClickEvent(self, event):
+        if self._custom_scale_adjusting:
+            event.ignore()
+            return
+
         if event.button() == Qt.MouseButton.LeftButton:
             if not self._is_at_bottom_boundary() and not self._allow_air_interaction():
                 return
@@ -708,6 +875,10 @@ class PetWindow(QWidget):
             super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self._custom_scale_adjusting:
+            event.ignore()
+            return
+
         if event.buttons() & Qt.MouseButton.LeftButton:
             # 拖拽时打断对话框
             self.dialogue_system.hide_dialogue()
@@ -741,6 +912,10 @@ class PetWindow(QWidget):
                 self.move(new_x, new_y)
 
     def mouseReleaseEvent(self, event):
+        if self._custom_scale_adjusting:
+            event.ignore()
+            return
+
         if event.button() == Qt.MouseButton.LeftButton:
             # 如果刚刚发生的是双击，这只是双击的鼠标松开事件，直接放行，不做任何打断
             if getattr(self, '_is_double_click', False):
@@ -767,17 +942,7 @@ class PetWindow(QWidget):
     def wheelEvent(self, event):
         # 鼠标悬停在桌宠上滚轮缩放
         delta = event.angleDelta().y()
-        if delta == 0:
-            super().wheelEvent(event)
-            return
-
-        step_count = int(delta / 120)
-        if step_count == 0:
-            step_count = 1 if delta > 0 else -1
-
-        old_scale = self.user_scale
-        self.user_scale = self._clamp_user_scale(self.user_scale + step_count * self.scale_step)
-        if self.user_scale != old_scale and self._apply_user_scale_to_current_movie():
+        if self.adjust_scale_by_wheel_delta(delta):
             event.accept()
             return
 

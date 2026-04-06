@@ -10,9 +10,10 @@ class BubbleButton(QPushButton):
     def __init__(self, text, is_back=False, icon_path=None, ui_scale=1.0, parent=None):
         super().__init__(text, parent)
         self.image_mode = False
-        self.ui_scale = max(0.5, min(2.5, float(ui_scale)))
-        self.default_size = max(36, int(70 * self.ui_scale))
-        self.image_size = max(42, int(80 * self.ui_scale))
+        # 按菜单缩放比例缩放按钮，缩小时下限为 0.4
+        self.ui_scale = max(0.4, min(2.5, float(ui_scale)))
+        self.default_size = max(28, int(70 * self.ui_scale))
+        self.image_size = max(32, int(80 * self.ui_scale))
         self.text_hover_size = max(self.default_size, int(self.default_size * 1.08))
         self.image_hover_size = max(self.image_size, int(self.image_size * 1.05))
         self.setFixedSize(self.default_size, self.default_size)
@@ -27,7 +28,7 @@ class BubbleButton(QPushButton):
             bg_url = icon_path.replace("\\", "/")
             self.text_color = "white"
             display_color = "transparent" if self.enable_outline else self.text_color
-            font_px = max(10, int(15 * self.ui_scale))
+            font_px = max(7, int(15 * self.ui_scale))
             self.setStyleSheet(f"""
                 QPushButton {{
                     border-image: url('{bg_url}');
@@ -85,7 +86,9 @@ class BubbleButton(QPushButton):
 
     def enterEvent(self, event):
         if self.parent() and hasattr(self.parent(), 'inactivity_timer'):
-            self.parent().inactivity_timer.start(15000)
+            auto_close_enabled = bool(getattr(self.parent(), 'auto_close_enabled', True))
+            if auto_close_enabled:
+                self.parent().inactivity_timer.start(15000)
         super().enterEvent(event)
         self.raise_()
         if hasattr(self, 'base_x') and hasattr(self, 'base_y') and hasattr(self, 'angle'):
@@ -189,7 +192,9 @@ class CircularMenuWidget(QWidget):
         
         self.center_pos = center_pos
         self.on_close_callback = on_close_callback
-        self.menu_scale = max(0.5, min(2.5, float(menu_scale)))
+        # 菜单可随桌宠缩小，最小 0.4
+        self.menu_scale = max(0.4, min(2.5, float(menu_scale)))
+        self.pet_widget = parent
 
         self.root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
         self.theme = load_dialog_theme()
@@ -198,17 +203,64 @@ class CircularMenuWidget(QWidget):
         self.quit_btn_path = self._resolve_theme_path(self.theme.get("circular_btn_quit", ""))
         
         self.history = [] # Stack of (items, page_idx)
+        self.suppress_auto_back = False
         self.current_items = items
         self.current_page = 0
         self.buttons = []
+        self._force_close = False
         
         # 15秒无操作自动关闭
         self.inactivity_timer = QTimer(self)
         self.inactivity_timer.setSingleShot(True)
         self.inactivity_timer.timeout.connect(self.close_menu)
+        self.auto_close_enabled = True
         self.inactivity_timer.start(15000)
         
         self._build_menu()
+
+    @staticmethod
+    def _menu_scale_from_pet_scale(pet_scale):
+        try:
+            scale = float(pet_scale)
+        except (TypeError, ValueError):
+            scale = 1.0
+
+        if scale >= 1.0:
+            mapped = 1.0 + (scale - 1.0) * 0.5
+        else:
+            mapped = scale
+        return max(0.4, min(2.5, mapped))
+
+    def sync_menu_scale_from_pet(self):
+        if self.pet_widget is None:
+            return False
+
+        new_scale = self._menu_scale_from_pet_scale(getattr(self.pet_widget, 'user_scale', 1.0))
+        actions = getattr(self.pet_widget, 'pet_actions', None)
+        if actions is not None and hasattr(actions, '_get_circular_menu_center_point'):
+            new_center = actions._get_circular_menu_center_point()
+        else:
+            new_center = self.pet_widget.mapToGlobal(self.pet_widget.rect().center())
+
+        scale_unchanged = abs(new_scale - self.menu_scale) <= 1e-6
+        center_unchanged = (new_center == self.center_pos)
+        if scale_unchanged and center_unchanged:
+            return False
+
+        self.menu_scale = new_scale
+        self.center_pos = new_center
+        self._build_menu()
+        return True
+
+    def set_auto_close_enabled(self, enabled):
+        self.auto_close_enabled = bool(enabled)
+        if self.auto_close_enabled:
+            self.inactivity_timer.start(15000)
+        else:
+            self.inactivity_timer.stop()
+
+    def _is_preview_adjusting(self):
+        return self.pet_widget is not None and getattr(self.pet_widget, '_custom_scale_adjusting', False)
 
     def _resolve_theme_path(self, path_val):
         if not path_val:
@@ -226,7 +278,22 @@ class CircularMenuWidget(QWidget):
             btn.deleteLater()
         self.buttons.clear()
         
-        R = max(70, int(120 * self.menu_scale))
+        btn_half = max(14, int((80 if self.use_image_buttons else 70) * self.menu_scale / 2))
+        R = max(48, int(120 * self.menu_scale))
+        if self.menu_scale > 1.0 and self.pet_widget is not None:
+            # 放大桌宠时拉开菜单半径，避免选项被桌宠遮住
+            raw_pet_w = max(1, int(self.pet_widget.width()))
+            raw_pet_h = max(1, int(self.pet_widget.height()))
+            user_scale = float(getattr(self.pet_widget, "user_scale", 1.0))
+            user_scale = max(1.0, user_scale)
+            # 半径变化与桌宠变化同样按“一半幅度”跟随
+            effective_scale = self._menu_scale_from_pet_scale(user_scale)
+            capped_ratio = effective_scale / user_scale
+            pet_w = max(1, int(round(raw_pet_w * capped_ratio)))
+            pet_h = max(1, int(round(raw_pet_h * capped_ratio)))
+            pet_radius = int(math.hypot(pet_w, pet_h) / 2)
+            clearance = max(12, int(12 * self.menu_scale))
+            R = max(R, pet_radius + btn_half + clearance)
         
         # Separate special items from regular ones
         regular_items = []
@@ -261,7 +328,7 @@ class CircularMenuWidget(QWidget):
             
         display_items = []
         # Add 'Back' button if in sub-menu
-        if self.history:
+        if self.history and not self.suppress_auto_back:
             display_items.append({'label': '返回', 'action': 'back'})
             
         display_items.extend(page_items)
@@ -274,7 +341,6 @@ class CircularMenuWidget(QWidget):
         else:
             # 智能判断可用的角度范围
             screen_geo = QApplication.primaryScreen().availableGeometry()
-            btn_half = max(18, int((80 if self.use_image_buttons else 70) * self.menu_scale / 2))
             margin = R + btn_half + 10  # 半径 + 按钮半径 + 边距
             
             can_up = (self.center_pos.y() - screen_geo.top()) >= margin
@@ -364,10 +430,15 @@ class CircularMenuWidget(QWidget):
             setattr(btn, 'anim', anim)
             btn.set_target_pos(tar_x, tar_y, angles[i])
             
-            def make_callback(action_val):
+            def make_callback(item_meta):
                 def cb():
+                    action_val = item_meta.get('action')
+                    close_before_action = bool(item_meta.get('close_before_action', True))
+                    close_after_action = bool(item_meta.get('close_after_action', True))
                     if action_val == 'back':
-                        self.current_items, self.current_page = self.history.pop()
+                        if not self.history:
+                            return
+                        self.current_items, self.current_page, self.suppress_auto_back = self.history.pop()
                         self._build_menu()
                     elif action_val == 'next_page':
                         self.current_page += 1
@@ -377,29 +448,68 @@ class CircularMenuWidget(QWidget):
                         self._build_menu()
                     elif isinstance(action_val, list):
                         # Enter sub-menu
-                        self.history.append((self.current_items, self.current_page))
+                        on_enter = item_meta.get('on_enter')
+                        if callable(on_enter):
+                            on_enter()
+                        self.history.append((self.current_items, self.current_page, self.suppress_auto_back))
                         self.current_items = action_val
                         self.current_page = 0
+                        self.suppress_auto_back = bool(item_meta.get('suppress_back', False))
                         self._build_menu()
                     elif callable(action_val):
-                        # Execute and close
-                        self.close_menu()
-                        action_val()
+                        # Execute with configurable close timing
+                        if close_before_action:
+                            self.close_menu()
+                            action_val()
+                        else:
+                            action_val()
+                            if close_after_action:
+                                self.close_menu()
                 return cb
                 
-            btn.clicked.connect(make_callback(item['action']))
+            btn.clicked.connect(make_callback(item))
             btn.show()
             self.buttons.append(btn)
             
     def mousePressEvent(self, event):
+        if self.pet_widget is not None and getattr(self.pet_widget, '_custom_scale_adjusting', False):
+            event.accept()
+            return
         # Click outside closes the menu
         self.close_menu()
         
     def mouseMoveEvent(self, event):
-        self.inactivity_timer.start(15000)
+        if self.auto_close_enabled:
+            self.inactivity_timer.start(15000)
         super().mouseMoveEvent(event)
+
+    def wheelEvent(self, event):
+        if self.pet_widget is not None and hasattr(self.pet_widget, 'adjust_scale_by_wheel_delta'):
+            global_pos = self.mapToGlobal(event.position().toPoint())
+            local_pos = self.pet_widget.mapFromGlobal(global_pos)
+            if self.pet_widget.rect().contains(local_pos):
+                if self.pet_widget.adjust_scale_by_wheel_delta(event.angleDelta().y()):
+                    if getattr(self.pet_widget, '_custom_scale_adjusting', False):
+                        self.sync_menu_scale_from_pet()
+                    if self.auto_close_enabled:
+                        self.inactivity_timer.start(15000)
+                    event.accept()
+                    return
+        super().wheelEvent(event)
         
-    def close_menu(self):
+    def closeEvent(self, event):
+        app = QApplication.instance()
+        app_closing = bool(app.closingDown()) if app is not None else False
+        if self._is_preview_adjusting() and not self._force_close and not app_closing:
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def close_menu(self, force=False):
+        if self._is_preview_adjusting() and not force:
+            return
         if self.on_close_callback:
             self.on_close_callback()
+        self._force_close = True
         self.close()
+        self._force_close = False
