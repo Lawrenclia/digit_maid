@@ -17,8 +17,8 @@ class PetWindow(QWidget):
         super().__init__()
 
         # 默认桌宠大小基准（缩放倍率为 1.0 时）
-        self.default_pet_width = 70
-        self.default_pet_height = 70
+        self.default_pet_width = 85
+        self.default_pet_height = 85
         
         self.initUI()
         self.offset = QPoint()

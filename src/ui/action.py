@@ -200,7 +200,7 @@ class PetActions:
 
         action_scale_reset = QAction('还原原大小', self.parent)
         action_scale_reset.triggered.connect(
-            lambda checked: self._apply_pet_scale(1.0, "已还原原大小 (70x70)")
+            lambda checked: self._apply_pet_scale(1.0, "已还原原大小")
         )
         scale_menu.addAction(action_scale_reset)
 
