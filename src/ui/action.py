@@ -423,6 +423,7 @@ class PetActions:
         ]
         top_items = [
             {'label': 'APP', 'action': app_sub_items},
+            {'label': 'VPN', 'action': lambda: self.do_open_app("v2rayN")},
             {'label': '截图', 'action': screenshot_sub_items},
             {'label': "设置", 'action': setting_label},
             {'label': '退出', 'action': self.trigger_quit}

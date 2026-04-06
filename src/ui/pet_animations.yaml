@@ -7,7 +7,7 @@
 
 base_dir: resource/wisdel/皮肤素材/可用素材
 fall_mode: smooth
-user_scale: 1.200
+user_scale: 1.0
 smooth_fall: true
 
 actions:
