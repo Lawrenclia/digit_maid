@@ -46,7 +46,8 @@ class OptionMenuController:
             return MenuOperationPolicy(
                 allow_idle_timer=False,
                 allow_wander=False,
-                allow_drag=False,
+                # 菜单展开时允许拖拽，左键按下会先关闭菜单再进入移动流程。
+                allow_drag=True,
                 allow_double_click=False,
                 allow_fall=False,
             )
