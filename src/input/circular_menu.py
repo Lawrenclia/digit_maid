@@ -1,4 +1,4 @@
-import math
+﻿import math
 import os
 from PyQt6.QtWidgets import QWidget, QPushButton, QApplication
 from PyQt6.QtCore import Qt, QPropertyAnimation, QRect, QEasingCurve, QPoint, QTimer, QPointF
@@ -7,9 +7,10 @@ from PyQt6.QtGui import QPainter, QColor, QPen, QPainterPath
 from .choice_dialog import load_dialog_theme
 
 class BubbleButton(QPushButton):
-    def __init__(self, text, is_back=False, icon_path=None, ui_scale=1.0, parent=None):
+    def __init__(self, text, is_back=False, icon_path=None, ui_scale=1.0, text_color="white", parent=None):
         super().__init__(text, parent)
         self.image_mode = False
+        self.text_color = text_color or "white"
         # 按菜单缩放比例缩放按钮，缩小时下限为 0.4
         self.ui_scale = max(0.4, float(ui_scale))
         self.default_size = max(28, int(70 * self.ui_scale))
@@ -26,7 +27,6 @@ class BubbleButton(QPushButton):
             self.image_mode = True
             self.setFixedSize(self.image_size, self.image_size)
             bg_url = icon_path.replace("\\", "/")
-            self.text_color = "white"
             display_color = "transparent" if self.enable_outline else self.text_color
             font_px = max(7, int(15 * self.ui_scale))
             self.setStyleSheet(f"""
@@ -56,7 +56,7 @@ class BubbleButton(QPushButton):
         self.setStyleSheet(f"""
             QPushButton {{
                 background-color: {bg_color};
-                color: white;
+                color: {self.text_color};
                 border-radius: {radius_px}px;
                 font-weight: bold;
                 border: {border_px}px solid {border_color};
@@ -194,7 +194,7 @@ class CircularMenuWidget(QWidget):
         self.on_close_callback = on_close_callback
         # 菜单可随桌宠缩小，最小 0.4
         self.menu_scale = max(0.4, float(menu_scale))
-        self.pet_widget = parent
+        self.maid_widget = parent
 
         self.root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
         self.theme = load_dialog_theme()
@@ -219,9 +219,9 @@ class CircularMenuWidget(QWidget):
         self._build_menu()
 
     @staticmethod
-    def _menu_scale_from_pet_scale(pet_scale):
+    def _menu_scale_from_maid_scale(maid_scale):
         try:
-            scale = float(pet_scale)
+            scale = float(maid_scale)
         except (TypeError, ValueError):
             scale = 1.0
 
@@ -231,16 +231,16 @@ class CircularMenuWidget(QWidget):
             mapped = scale
         return max(0.4, mapped)
 
-    def sync_menu_scale_from_pet(self):
-        if self.pet_widget is None:
+    def sync_menu_scale_from_maid(self):
+        if self.maid_widget is None:
             return False
 
-        new_scale = self._menu_scale_from_pet_scale(getattr(self.pet_widget, 'user_scale', 1.0))
-        actions = getattr(self.pet_widget, 'pet_actions', None)
+        new_scale = self._menu_scale_from_maid_scale(getattr(self.maid_widget, 'user_scale', 1.0))
+        actions = getattr(self.maid_widget, 'maid_actions', None)
         if actions is not None and hasattr(actions, '_get_circular_menu_center_point'):
             new_center = actions._get_circular_menu_center_point()
         else:
-            new_center = self.pet_widget.mapToGlobal(self.pet_widget.rect().center())
+            new_center = self.maid_widget.mapToGlobal(self.maid_widget.rect().center())
 
         scale_unchanged = abs(new_scale - self.menu_scale) <= 1e-6
         center_unchanged = (new_center == self.center_pos)
@@ -260,7 +260,7 @@ class CircularMenuWidget(QWidget):
             self.inactivity_timer.stop()
 
     def _is_preview_adjusting(self):
-        return self.pet_widget is not None and getattr(self.pet_widget, '_custom_scale_adjusting', False)
+        return self.maid_widget is not None and getattr(self.maid_widget, '_custom_scale_adjusting', False)
 
     def _resolve_theme_path(self, path_val):
         if not path_val:
@@ -379,6 +379,7 @@ class CircularMenuWidget(QWidget):
             
         for i, item in enumerate(display_items):
             is_special_btn = (item['label'] in ['返回', '退出', '<', '>'])
+            text_color = item.get('text_color', 'white')
             icon_path = None
             if self.use_image_buttons:
                 if is_special_btn:
@@ -391,6 +392,7 @@ class CircularMenuWidget(QWidget):
                 is_back=is_special_btn,
                 icon_path=icon_path,
                 ui_scale=self.menu_scale,
+                text_color=text_color,
                 parent=self
             )
             
@@ -458,7 +460,7 @@ class CircularMenuWidget(QWidget):
             self.buttons.append(btn)
             
     def mousePressEvent(self, event):
-        if self.pet_widget is not None and getattr(self.pet_widget, '_custom_scale_adjusting', False):
+        if self.maid_widget is not None and getattr(self.maid_widget, '_custom_scale_adjusting', False):
             event.accept()
             return
         # Click outside closes the menu
@@ -470,13 +472,13 @@ class CircularMenuWidget(QWidget):
         super().mouseMoveEvent(event)
 
     def wheelEvent(self, event):
-        if self.pet_widget is not None and hasattr(self.pet_widget, 'adjust_scale_by_wheel_delta'):
+        if self.maid_widget is not None and hasattr(self.maid_widget, 'adjust_scale_by_wheel_delta'):
             global_pos = self.mapToGlobal(event.position().toPoint())
-            local_pos = self.pet_widget.mapFromGlobal(global_pos)
-            if self.pet_widget.rect().contains(local_pos):
-                if self.pet_widget.adjust_scale_by_wheel_delta(event.angleDelta().y()):
-                    if getattr(self.pet_widget, '_custom_scale_adjusting', False):
-                        self.sync_menu_scale_from_pet()
+            local_pos = self.maid_widget.mapFromGlobal(global_pos)
+            if self.maid_widget.rect().contains(local_pos):
+                if self.maid_widget.adjust_scale_by_wheel_delta(event.angleDelta().y()):
+                    if getattr(self.maid_widget, '_custom_scale_adjusting', False):
+                        self.sync_menu_scale_from_maid()
                     if self.auto_close_enabled:
                         self.inactivity_timer.start(15000)
                     event.accept()
@@ -499,3 +501,4 @@ class CircularMenuWidget(QWidget):
         self._force_close = True
         self.close()
         self._force_close = False
+

@@ -16,7 +16,7 @@ else:
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from src.ui.pet_window import PetWindow
+from src.ui.maid_window import MaidWindow
 
 
 def _acquire_single_instance_lock():
@@ -51,8 +51,8 @@ def main():
     app._instance_lock = instance_lock
     
     # 创建并显示桌宠窗口
-    pet = PetWindow()
-    pet.show()
+    maid = MaidWindow()
+    maid.show()
     
     print("桌宠已启动。右键点击桌宠可查看功能菜单。")
     
@@ -60,3 +60,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+

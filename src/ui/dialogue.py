@@ -97,9 +97,9 @@ class SpeechBubble(QWidget):
         self.timer.start(2000)
 
     @staticmethod
-    def _menu_scale_from_pet_scale(pet_scale):
+    def _menu_scale_from_maid_scale(maid_scale):
         try:
-            scale = float(pet_scale)
+            scale = float(maid_scale)
         except (TypeError, ValueError):
             scale = 1.0
 
@@ -112,7 +112,7 @@ class SpeechBubble(QWidget):
     def _resolve_ui_scale(self):
         if self.target is None:
             return 1.0
-        return self._menu_scale_from_pet_scale(getattr(self.target, "user_scale", 1.0))
+        return self._menu_scale_from_maid_scale(getattr(self.target, "user_scale", 1.0))
 
     def _compute_menu_radius(self, ui_scale):
         btn_half = max(14, int((80 if self.use_image_buttons else 70) * ui_scale / 2))
@@ -152,7 +152,7 @@ class SpeechBubble(QWidget):
         if self.target is None:
             return None
 
-        actions = getattr(self.target, "pet_actions", None)
+        actions = getattr(self.target, "maid_actions", None)
         if actions is not None and hasattr(actions, "_get_circular_menu_center_point"):
             try:
                 return actions._get_circular_menu_center_point()
@@ -259,3 +259,4 @@ class DialogueSystem:
                 self.current_bubble = None
             except:
                 pass
+

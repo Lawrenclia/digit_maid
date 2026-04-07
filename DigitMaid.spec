@@ -14,7 +14,7 @@ a = Analysis(
         (str(PROJECT_ROOT / 'resource'), 'resource'),
         (str(PROJECT_ROOT / 'src' / 'function' / 'apps.yaml'), 'src/function'),
         (str(PROJECT_ROOT / 'src' / 'input' / 'dialog_style.yaml'), 'src/input'),
-        (str(PROJECT_ROOT / 'src' / 'ui' / 'pet_animations.yaml'), 'src/ui'),
+        (str(PROJECT_ROOT / 'src' / 'ui' / 'maid_animations.yaml'), 'src/ui'),
     ],
     hiddenimports=[],
     hookspath=[],
@@ -47,3 +47,4 @@ exe = EXE(
     entitlements_file=None,
     icon=[str(PROJECT_ROOT / 'icon.ico')],
 )
+

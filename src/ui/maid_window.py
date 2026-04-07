@@ -9,16 +9,26 @@ from PyQt6.QtGui import QMovie, QTransform
 import sys
 
 # 导入分离后的UI模块
-from .dialogue import DialogueSystem
-from .action import PetActions
+try:
+    from .dialogue import DialogueSystem
+    from .action import MaidActions
+    from .menu_controller import OptionMenuController
+except ImportError:
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(current_dir, "../../"))
+    if project_root not in sys.path:
+        sys.path.append(project_root)
+    from src.ui.dialogue import DialogueSystem
+    from src.ui.action import MaidActions
+    from src.ui.menu_controller import OptionMenuController
 
-class PetWindow(QWidget):
+class MaidWindow(QWidget):
     def __init__(self):
         super().__init__()
 
         # 素材未加载时的初始窗口大小（真实显示大小由 GIF 帧尺寸决定）
-        self.default_pet_width = 85
-        self.default_pet_height = 85
+        self.default_maid_width = 85
+        self.default_maid_height = 85
         
         self.initUI()
         self.offset = QPoint()
@@ -27,19 +37,22 @@ class PetWindow(QWidget):
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
         self.root_dir = root_dir
         self.current_action = "idle"
+
+        # 统一管理菜单可见状态与操作权限
+        self.menu_controller = OptionMenuController()
         
         # 初始化各个子系统
         self.dialogue_system = DialogueSystem(self)
-        self.pet_actions = PetActions(self, self.dialogue_system)
+        self.maid_actions = MaidActions(self, self.dialogue_system)
 
         # GIF 显示层
-        self.pet_label = QLabel(self)
-        self.pet_label.setStyleSheet("background: transparent;")
-        self.pet_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.pet_label.setScaledContents(True)
+        self.maid_label = QLabel(self)
+        self.maid_label.setStyleSheet("background: transparent;")
+        self.maid_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.maid_label.setScaledContents(True)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.pet_label)
+        layout.addWidget(self.maid_label)
 
         # 动作配置
         self.anim_cfg = self._load_animation_config()
@@ -105,6 +118,33 @@ class PetWindow(QWidget):
         # 仅提升Z轴顺序，不窃取焦点，避免影响用户打字
         self.raise_()
 
+    def _is_menu_ui_active(self):
+        if getattr(self, "menu_interact_mode", False):
+            return True
+
+        controller = getattr(self, "menu_controller", None)
+        if controller is not None and controller.is_menu_open:
+            return True
+
+        if getattr(self, "_list_menu_open", False):
+            return True
+
+        actions = getattr(self, "maid_actions", None)
+        if actions is None:
+            return False
+
+        circular_menu = getattr(actions, "circular_menu", None)
+        if circular_menu is None:
+            return False
+
+        return bool(getattr(circular_menu, "isVisible", lambda: False)())
+
+    def _operation_allowed(self, operation_name):
+        controller = getattr(self, "menu_controller", None)
+        if controller is None:
+            return True
+        return controller.allows(operation_name)
+
     def initUI(self):
         # ... (保持不变)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
@@ -112,18 +152,18 @@ class PetWindow(QWidget):
         
         # 获取屏幕尺寸
         screen = QApplication.primaryScreen().availableGeometry()
-        pet_width = self.default_pet_width
-        pet_height = self.default_pet_height
+        maid_width = self.default_maid_width
+        maid_height = self.default_maid_height
         
         # 计算左下角位置 (加上一点边距)
         x = screen.left() + 100 
-        y = screen.bottom() - pet_height + 10
+        y = screen.bottom() - maid_height + 10
         
-        self.setGeometry(x, y, pet_width, pet_height)
+        self.setGeometry(x, y, maid_width, maid_height)
         self.setWindowTitle('DigitMaid')
 
     def _load_animation_config(self):
-        cfg_path = os.path.join(os.path.dirname(__file__), "pet_animations.yaml")
+        cfg_path = os.path.join(os.path.dirname(__file__), "maid_animations.yaml")
         try:
             with open(cfg_path, "r", encoding="utf-8") as f:
                 lines = [line.rstrip("\n") for line in f]
@@ -257,7 +297,7 @@ class PetWindow(QWidget):
             old_height = self.height()
             screen_geo = self.screen().availableGeometry()
 
-            target_width, target_height = self._get_target_pet_size()
+            target_width, target_height = self._get_target_maid_size()
             
             # 保持桌宠的左下角不发生偏移（防止不同宽高且大小不一的动作导致位置乱跳）
             left_x = current_pos.x()
@@ -277,7 +317,7 @@ class PetWindow(QWidget):
             new_y = max(screen_geo.top(), new_y)
             
             movie.setScaledSize(QSize(target_width, target_height))
-            self.pet_label.setFixedSize(target_width, target_height)
+            self.maid_label.setFixedSize(target_width, target_height)
             # 先刷新布局约束，再执行缩放和位移；否则从大动作切回小动作时
             # 可能只移动到新 y 而尺寸仍被旧约束卡住，出现“逐次下沉”。
             if self.layout() is not None:
@@ -300,7 +340,7 @@ class PetWindow(QWidget):
             self.is_flipped = getattr(self, "is_flipped", False)
         
         if not self.is_flipped:
-            self.pet_label.setMovie(movie)
+            self.maid_label.setMovie(movie)
             
         movie.start()
         
@@ -308,7 +348,7 @@ class PetWindow(QWidget):
             # 手动提取第一帧进行翻转并上屏
             pixmap = movie.currentPixmap()
             if not pixmap.isNull():
-                self.pet_label.setPixmap(pixmap.transformed(self._flip_transform))
+                self.maid_label.setPixmap(pixmap.transformed(self._flip_transform))
         
         # 只有在 idle 状态下才允许计时器流动
         if action_name == "idle" and hasattr(self, 'inactivity_timer'):
@@ -316,13 +356,13 @@ class PetWindow(QWidget):
             
         return True
 
-    def _get_target_pet_size(self):
+    def _get_target_maid_size(self):
         if self._source_frame_size is not None and not self._source_frame_size.isEmpty():
             base_width = max(1, int(round(self._source_frame_size.width() * self.base_render_scale)))
             base_height = max(1, int(round(self._source_frame_size.height() * self.base_render_scale)))
         else:
-            base_width = self.default_pet_width
-            base_height = self.default_pet_height
+            base_width = self.default_maid_width
+            base_height = self.default_maid_height
 
         target_width = max(1, int(round(base_width * self.user_scale)))
         target_height = max(1, int(round(base_height * self.user_scale)))
@@ -349,6 +389,8 @@ class PetWindow(QWidget):
         if not self._custom_scale_adjusting:
             self._custom_scale_backup = float(self.user_scale)
         self._custom_scale_adjusting = True
+        if hasattr(self, "menu_controller"):
+            self.menu_controller.set_custom_scale_adjusting(True)
         self._scale_preview_tip_timer.stop()
         self.wander_timer.stop()
         self._stop_inactivity_timer(reset_stage=False)
@@ -360,6 +402,8 @@ class PetWindow(QWidget):
         if not self._custom_scale_adjusting:
             return True, f"当前倍率: {self.user_scale:.1f}"
         self._custom_scale_adjusting = False
+        if hasattr(self, "menu_controller"):
+            self.menu_controller.set_custom_scale_adjusting(False)
         self._scale_preview_tip_timer.stop()
         self._custom_scale_backup = float(self.user_scale)
         self._save_persisted_user_scale()
@@ -372,9 +416,11 @@ class PetWindow(QWidget):
             return True, "已取消（没有未保存的自定义调整）"
 
         self._custom_scale_adjusting = False
+        if hasattr(self, "menu_controller"):
+            self.menu_controller.set_custom_scale_adjusting(False)
         self._scale_preview_tip_timer.stop()
         backup = float(self._custom_scale_backup)
-        ok, _ = self.set_pet_scale_factor(backup)
+        ok, _ = self.set_maid_scale_factor(backup)
         if not getattr(self, "menu_interact_mode", False) and self.current_action == "idle":
             self._reset_inactivity_timer()
         if ok:
@@ -413,14 +459,14 @@ class PetWindow(QWidget):
             self._schedule_scale_preview_tip()
             return True
 
-        ok, _ = self.set_pet_scale_factor(self.user_scale)
+        ok, _ = self.set_maid_scale_factor(self.user_scale)
         if ok:
             self._sync_open_circular_menu_scale()
             self._schedule_scale_preview_tip()
         return ok
 
     def _sync_open_circular_menu_scale(self):
-        actions = getattr(self, "pet_actions", None)
+        actions = getattr(self, "maid_actions", None)
         if actions is None:
             return
         menu = getattr(actions, "circular_menu", None)
@@ -428,10 +474,10 @@ class PetWindow(QWidget):
             return
         if not getattr(menu, "isVisible", lambda: False)():
             return
-        if hasattr(menu, "sync_menu_scale_from_pet"):
-            menu.sync_menu_scale_from_pet()
+        if hasattr(menu, "sync_menu_scale_from_maid"):
+            menu.sync_menu_scale_from_maid()
 
-    def set_pet_scale_factor(self, value):
+    def set_maid_scale_factor(self, value):
         try:
             target_scale = float(value)
         except (TypeError, ValueError):
@@ -444,7 +490,7 @@ class PetWindow(QWidget):
             return True, f"当前缩放倍数: {self.user_scale:.2f}"
 
         # 没有当前动画时，也按默认尺寸缩放窗口，保持设置即时生效
-        target_width, target_height = self._get_target_pet_size()
+        target_width, target_height = self._get_target_maid_size()
         current_pos = self.pos()
         old_height = self.height()
         screen_geo = self.screen().availableGeometry()
@@ -462,7 +508,7 @@ class PetWindow(QWidget):
         new_x = max(screen_geo.left(), new_x)
         new_y = max(screen_geo.top(), new_y)
 
-        self.pet_label.setFixedSize(target_width, target_height)
+        self.maid_label.setFixedSize(target_width, target_height)
         if self.layout() is not None:
             self.layout().activate()
         self.resize(target_width, target_height)
@@ -475,7 +521,7 @@ class PetWindow(QWidget):
         if self.current_movie is None:
             return False
 
-        target_width, target_height = self._get_target_pet_size()
+        target_width, target_height = self._get_target_maid_size()
 
         current_pos = self.pos()
         old_height = self.height()
@@ -495,7 +541,7 @@ class PetWindow(QWidget):
         new_y = max(screen_geo.top(), new_y)
 
         self.current_movie.setScaledSize(QSize(target_width, target_height))
-        self.pet_label.setFixedSize(target_width, target_height)
+        self.maid_label.setFixedSize(target_width, target_height)
         if self.layout() is not None:
             self.layout().activate()
         self.resize(target_width, target_height)
@@ -511,7 +557,7 @@ class PetWindow(QWidget):
         if getattr(self, "is_flipped", False):
             pixmap = sender_movie.currentPixmap()
             if not pixmap.isNull():
-                self.pet_label.setPixmap(pixmap.transformed(self._flip_transform))
+                self.maid_label.setPixmap(pixmap.transformed(self._flip_transform))
                 
         # 检查是否到达最后一帧
         frame_count = sender_movie.frameCount()
@@ -533,7 +579,7 @@ class PetWindow(QWidget):
             return
 
         # 菜单打开期间锁定为 interact，避免动作结束后误回 idle
-        if getattr(self, "menu_interact_mode", False):
+        if self._is_menu_ui_active():
             self._stop_inactivity_timer(reset_stage=True)
             if self.current_action != "interact":
                 self.play_action("interact", force_loop=True)
@@ -560,7 +606,12 @@ class PetWindow(QWidget):
                     self.play_action("idle")
 
     def _on_wander_tick(self):
-        if getattr(self, "menu_interact_mode", False):
+        controller = getattr(self, "menu_controller", None)
+        if controller is not None and not controller.policy.allow_wander:
+            self.wander_timer.stop()
+            return
+
+        if self._is_menu_ui_active():
             self.wander_timer.stop()
             return
 
@@ -583,7 +634,7 @@ class PetWindow(QWidget):
             self.wander_speed *= -1
             self.is_flipped = False
             if self.current_movie:
-                self.pet_label.setMovie(self.current_movie)
+                self.maid_label.setMovie(self.current_movie)
         elif new_x + self.width() > screen_geo.right() or new_x > start_x + 100:
             new_x = min(screen_geo.right() - self.width(), start_x + 100)
             self.wander_speed *= -1
@@ -592,7 +643,7 @@ class PetWindow(QWidget):
                 pixmap = self.current_movie.currentPixmap()
                 if not pixmap.isNull():
                     transform = QTransform().scale(-1, 1)
-                    self.pet_label.setPixmap(pixmap.transformed(transform))
+                    self.maid_label.setPixmap(pixmap.transformed(transform))
             
         self.move(new_x, self.y())
 
@@ -601,7 +652,13 @@ class PetWindow(QWidget):
         self._start_inactivity_timer(15000) # 15秒以后进入水平move
 
     def _start_inactivity_timer(self, duration_ms):
-        if getattr(self, "menu_interact_mode", False) or self._custom_scale_adjusting:
+        controller = getattr(self, "menu_controller", None)
+        if controller is not None and not controller.policy.allow_idle_timer:
+            self._inactivity_deadline = None
+            self.inactivity_timer.stop()
+            return
+
+        if self._is_menu_ui_active() or self._custom_scale_adjusting:
             self._inactivity_deadline = None
             self.inactivity_timer.stop()
             return
@@ -631,7 +688,7 @@ class PetWindow(QWidget):
         self._inactivity_deadline = None
 
         # 菜单打开期间不进入 idle/sit/sleep 状态机，保持 interact
-        if getattr(self, "menu_interact_mode", False):
+        if self._is_menu_ui_active():
             self._stop_inactivity_timer(reset_stage=True)
             if self.current_action != "interact":
                 self.play_action("interact", force_loop=True)
@@ -689,6 +746,10 @@ class PetWindow(QWidget):
         self._is_falling = False
 
     def _start_fall_to_bottom(self):
+        if not self._operation_allowed("allow_fall"):
+            self._stop_fall()
+            return
+
         if self._custom_scale_adjusting:
             self._stop_fall()
             return
@@ -743,6 +804,10 @@ class PetWindow(QWidget):
         self._fall_timer.start(24)
 
     def _on_fall_tick(self):
+        if not self._operation_allowed("allow_fall"):
+            self._stop_fall()
+            return
+
         if self._custom_scale_adjusting:
             self._stop_fall()
             return
@@ -810,11 +875,15 @@ class PetWindow(QWidget):
             event.ignore()
             return
 
+        if event.button() == Qt.MouseButton.LeftButton and not self._operation_allowed("allow_drag"):
+            event.ignore()
+            return
+
         if event.button() == Qt.MouseButton.LeftButton:
             # 当左键点击(准备拖拽或点击)时，如果有气泡菜单则关闭
-            if hasattr(self.pet_actions, "circular_menu") and self.pet_actions.circular_menu is not None:
-                if getattr(self.pet_actions.circular_menu, "isVisible", lambda: False)():
-                    self.pet_actions.circular_menu.close_menu()
+            if hasattr(self.maid_actions, "circular_menu") and self.maid_actions.circular_menu is not None:
+                if getattr(self.maid_actions.circular_menu, "isVisible", lambda: False)():
+                    self.maid_actions.circular_menu.close_menu()
 
             self.offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             self._is_dragging = False
@@ -844,10 +913,14 @@ class PetWindow(QWidget):
             self.play_action("interact", force_loop=True)
             
             # 委托 action 模块处理右键菜单
-            self.pet_actions.show_context_menu(event.globalPosition().toPoint())
+            self.maid_actions.show_context_menu(event.globalPosition().toPoint())
 
     def mouseDoubleClickEvent(self, event):
         if self._custom_scale_adjusting:
+            event.ignore()
+            return
+
+        if event.button() == Qt.MouseButton.LeftButton and not self._operation_allowed("allow_double_click"):
             event.ignore()
             return
 
@@ -876,6 +949,10 @@ class PetWindow(QWidget):
 
     def mouseMoveEvent(self, event):
         if self._custom_scale_adjusting:
+            event.ignore()
+            return
+
+        if event.buttons() & Qt.MouseButton.LeftButton and not self._operation_allowed("allow_drag"):
             event.ignore()
             return
 
@@ -913,6 +990,11 @@ class PetWindow(QWidget):
 
     def mouseReleaseEvent(self, event):
         if self._custom_scale_adjusting:
+            event.ignore()
+            return
+
+        if event.button() == Qt.MouseButton.LeftButton and not self._operation_allowed("allow_drag"):
+            self._is_dragging = False
             event.ignore()
             return
 
@@ -960,6 +1042,7 @@ class PetWindow(QWidget):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    pet = PetWindow()
-    pet.show()
+    maid = MaidWindow()
+    maid.show()
     sys.exit(app.exec())
+

@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QMenu, QApplication
+﻿from PyQt6.QtWidgets import QMenu, QApplication
 from PyQt6.QtGui import QAction, QActionGroup
 from PyQt6.QtCore import QTimer, QObject, QEvent, QPoint
 import os
@@ -7,8 +7,9 @@ from src.function.open_app import load_app_paths
 from src.input import choice_dialog
 from src.input.choice_dialog import load_dialog_theme
 from src.input.circular_menu import CircularMenuWidget
+from .menu_controller import OptionMenuController
 
-class PetActions:
+class MaidActions:
     FALL_MODE_LABELS = {
         "smooth": "缓降飘落",
         "direct": "快速直落",
@@ -18,9 +19,25 @@ class PetActions:
     def __init__(self, parent_widget, dialogue_system):
         self.parent = parent_widget
         self.dialogue = dialogue_system
+        if not hasattr(self.parent, "menu_controller"):
+            self.parent.menu_controller = OptionMenuController()
+        if not hasattr(self.parent, "_list_menu_open"):
+            self.parent._list_menu_open = False
 
-    def _get_pet_animation_cfg_path(self):
-        return os.path.join(os.path.dirname(__file__), "pet_animations.yaml")
+    def _set_list_menu_open_state(self, is_open):
+        is_open = bool(is_open)
+        self.parent._list_menu_open = is_open
+        controller = getattr(self.parent, "menu_controller", None)
+        if controller is not None:
+            controller.set_list_menu_open(is_open)
+
+    def _set_circular_menu_open_state(self, is_open):
+        controller = getattr(self.parent, "menu_controller", None)
+        if controller is not None:
+            controller.set_circular_menu_open(bool(is_open))
+
+    def _get_maid_animation_cfg_path(self):
+        return os.path.join(os.path.dirname(__file__), "maid_animations.yaml")
 
     def _get_current_fall_mode(self):
         anim_cfg = getattr(self.parent, "anim_cfg", {}) or {}
@@ -34,7 +51,7 @@ class PetActions:
         if mode not in self.FALL_MODE_LABELS:
             return False
 
-        cfg_path = self._get_pet_animation_cfg_path()
+        cfg_path = self._get_maid_animation_cfg_path()
         try:
             with open(cfg_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
@@ -74,9 +91,9 @@ class PetActions:
         self.dialogue.show_message("下落模式", f"已切换为: {self.FALL_MODE_LABELS[mode]}")
         return True
 
-    def _apply_pet_scale(self, scale_value, tip_prefix=""):
-        if hasattr(self.parent, "set_pet_scale_factor"):
-            ok, detail = self.parent.set_pet_scale_factor(scale_value)
+    def _apply_maid_scale(self, scale_value, tip_prefix=""):
+        if hasattr(self.parent, "set_maid_scale_factor"):
+            ok, detail = self.parent.set_maid_scale_factor(scale_value)
         else:
             ok, detail = False, "当前窗口不支持缩放"
 
@@ -87,7 +104,7 @@ class PetActions:
             self.dialogue.show_message("大小调整", detail or "调整大小失败")
         return ok
 
-    def _set_custom_pet_scale(self):
+    def _set_custom_maid_scale(self):
         return self._start_custom_scale_adjustment()
 
     def _start_custom_scale_adjustment(self):
@@ -147,7 +164,7 @@ class PetActions:
         if source_size is not None and hasattr(source_size, "isEmpty") and not source_size.isEmpty():
             base_height = max(1, int(round(source_size.height() * base_render_scale)))
         else:
-            base_height = max(1, int(getattr(self.parent, "default_pet_height", self.parent.height())))
+            base_height = max(1, int(getattr(self.parent, "default_maid_height", self.parent.height())))
 
         # 允许缩小时圆心随尺寸下移，但最低只到 0.4 倍对应的位置
         min_scale_for_center = 0.4
@@ -155,9 +172,9 @@ class PetActions:
         center_y = min(current_center.y(), min_center_y)
         return QPoint(current_center.x(), center_y)
 
-    def _menu_scale_from_pet_scale(self, pet_scale):
+    def _menu_scale_from_maid_scale(self, maid_scale):
         try:
-            scale = float(pet_scale)
+            scale = float(maid_scale)
         except (TypeError, ValueError):
             scale = 1.0
 
@@ -183,11 +200,14 @@ class PetActions:
         menu_style = theme.get("menu_style", "list")
 
         if menu_style == "circular":
+            self._set_list_menu_open_state(False)
             self.show_circular_menu(global_pos)
             return
 
+        self._set_circular_menu_open_state(False)
+
         menu = QMenu(self.parent)
-        scale = self._menu_scale_from_pet_scale(getattr(self.parent, "user_scale", 1.0))
+        scale = self._menu_scale_from_maid_scale(getattr(self.parent, "user_scale", 1.0))
         border_px = max(1, int(2 * scale))
         radius_px = max(6, int(10 * scale))
         menu_pad_px = max(2, int(5 * scale))
@@ -266,19 +286,19 @@ class PetActions:
 
         action_scale_reset = QAction('还原原大小', self.parent)
         action_scale_reset.triggered.connect(
-            lambda checked: self._apply_pet_scale(1.0, "已还原原大小")
+            lambda checked: self._apply_maid_scale(1.0, "已还原原大小")
         )
         scale_menu.addAction(action_scale_reset)
 
         action_scale_up = QAction('放大1.5倍', self.parent)
         action_scale_up.triggered.connect(
-            lambda checked: self._apply_pet_scale(1.5, "已放大到 1.5 倍")
+            lambda checked: self._apply_maid_scale(1.5, "已放大到 1.5 倍")
         )
         scale_menu.addAction(action_scale_up)
 
         action_scale_down = QAction('缩小为0.6倍', self.parent)
         action_scale_down.triggered.connect(
-            lambda checked: self._apply_pet_scale(0.6, "已缩小到 0.6 倍")
+            lambda checked: self._apply_maid_scale(0.6, "已缩小到 0.6 倍")
         )
         scale_menu.addAction(action_scale_down)
 
@@ -350,21 +370,25 @@ class PetActions:
         menu.installEventFilter(menu_filter)
         menu_timer.start(15000)
 
-        menu.exec(global_pos)
+        self._set_list_menu_open_state(True)
+        try:
+            menu.exec(global_pos)
 
-        if getattr(self.parent, "_custom_scale_adjusting", False):
-            # 预览态下若菜单意外关闭，不要回 idle；保持交互态，允许继续滚轮调节后再手动保存/退出
-            self.parent.menu_interact_mode = True
-            self.parent.play_action("interact", force_loop=True)
+            if getattr(self.parent, "_custom_scale_adjusting", False):
+                # 预览态下若菜单意外关闭，不要回 idle；保持交互态，允许继续滚轮调节后再手动保存/退出
+                self.parent.menu_interact_mode = True
+                self.parent.play_action("interact", force_loop=True)
+                if hasattr(self.parent, "force_on_top"):
+                    self.parent.force_on_top()
+                return
+
+            # 阻塞调用结束，手动恢复桌宠的状态
+            self.parent.menu_interact_mode = False
+            self.parent.play_action("idle")
             if hasattr(self.parent, "force_on_top"):
                 self.parent.force_on_top()
-            return
-        
-        # 阻塞调用结束，手动恢复桌宠的状态
-        self.parent.menu_interact_mode = False
-        self.parent.play_action("idle")
-        if hasattr(self.parent, "force_on_top"):
-            self.parent.force_on_top()
+        finally:
+            self._set_list_menu_open_state(False)
 
     def show_circular_menu(self, global_pos):
         """用半圆形菜单展开相同的选项"""
@@ -386,16 +410,16 @@ class PetActions:
         fall_mode_sub_items = [
             {
                 'label': label,
-                'text_color': '#c41c1c' if mode == current_mode else 'white',
+                'text_color': "#e32e2e" if mode == current_mode else 'white',
                 'action': lambda m=mode: self._set_fall_mode(m)
             }
             for mode, label in self.FALL_MODE_LABELS.items()
         ]
 
         scale_sub_items = [
-            {'label': '默认大小', 'action': lambda: self._apply_pet_scale(1.0, "已还原原大小")},
-            {'label': '放大', 'action': lambda: self._apply_pet_scale(1.5, "已放大到 1.5 倍")},
-            {'label': '缩小', 'action': lambda: self._apply_pet_scale(0.6, "已缩小到 0.6 倍")},
+            {'label': '默认大小', 'action': lambda: self._apply_maid_scale(1.0, "已还原原大小")},
+            {'label': '放大', 'action': lambda: self._apply_maid_scale(1.5, "已放大到 1.5 倍")},
+            {'label': '缩小', 'action': lambda: self._apply_maid_scale(0.6, "已缩小到 0.6 倍")},
             {
                 'label': '自定义大小',
                 'action': [
@@ -426,7 +450,7 @@ class PetActions:
             {'label': 'VPN', 'action': lambda: self.do_open_app("v2rayN")},
             {'label': '截图', 'action': screenshot_sub_items},
             {'label': "设置", 'action': setting_label},
-            {'label': '退出', 'action': self.trigger_quit}
+            {'label': '关闭', 'action': self.trigger_quit}
         ]
         
         # 缩小时允许圆心下移，最低到 0.4 倍大小对应的位置
@@ -437,12 +461,14 @@ class PetActions:
             items=top_items,
             center_pos=center_point,
             on_close_callback=lambda: self.on_circular_menu_closed(),
-            menu_scale=self._menu_scale_from_pet_scale(getattr(self.parent, "user_scale", 1.0)),
+            menu_scale=self._menu_scale_from_maid_scale(getattr(self.parent, "user_scale", 1.0)),
             parent=self.parent
         )
         self.circular_menu.show()
+        self._set_circular_menu_open_state(True)
         
     def on_circular_menu_closed(self):
+        self._set_circular_menu_open_state(False)
         if getattr(self.parent, "_custom_scale_adjusting", False):
             # 预览进行中禁止通过关闭菜单回到 idle，必须走“保存/返回”完成事务
             self.parent.menu_interact_mode = True
@@ -577,3 +603,4 @@ class PetActions:
         self.dialogue.show_message("开机自启动", result)
 
         return ok
+

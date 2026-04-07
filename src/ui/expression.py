@@ -1,7 +1,7 @@
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen
 from PyQt6.QtCore import Qt
 
-class PetPainter:
+class MaidPainter:
     def paint(self, painter: QPainter, width: int, height: int, state: dict):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -55,3 +55,4 @@ class PetPainter:
         painter.setBrush(QBrush(QColor(255, 192, 203, 150))) # 粉色半透明
         painter.drawEllipse(20, 70, 20, 10)
         painter.drawEllipse(110, 70, 20, 10)
+
