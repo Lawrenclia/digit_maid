@@ -441,7 +441,7 @@ class PetWindow(QWidget):
         if self._apply_user_scale_to_current_movie():
             if not self._custom_scale_adjusting:
                 self._save_persisted_user_scale()
-            return True, f"当前大小: {self.width()}x{self.height()}，缩放倍数: {self.user_scale:.2f}"
+            return True, f"当前缩放倍数: {self.user_scale:.2f}"
 
         # 没有当前动画时，也按默认尺寸缩放窗口，保持设置即时生效
         target_width, target_height = self._get_target_pet_size()
@@ -469,7 +469,7 @@ class PetWindow(QWidget):
         self.move(new_x, new_y)
         if not self._custom_scale_adjusting:
             self._save_persisted_user_scale()
-        return True, f"当前大小: {self.width()}x{self.height()}，缩放倍数: {self.user_scale:.2f}"
+        return True, f"当前缩放倍数: {self.user_scale:.2f}"
 
     def _apply_user_scale_to_current_movie(self):
         if self.current_movie is None:

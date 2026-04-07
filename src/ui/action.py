@@ -82,9 +82,9 @@ class PetActions:
 
         if ok:
             msg = f"{tip_prefix}，{detail}" if tip_prefix else detail
-            self.dialogue.show_message("放大缩小", msg)
+            self.dialogue.show_message("大小调整", msg)
         else:
-            self.dialogue.show_message("放大缩小", detail or "调整大小失败")
+            self.dialogue.show_message("大小调整", detail or "调整大小失败")
         return ok
 
     def _set_custom_pet_scale(self):
@@ -262,7 +262,7 @@ class PetActions:
 
         settings_menu = menu.addMenu("设置")
 
-        scale_menu = settings_menu.addMenu("放大缩小")
+        scale_menu = settings_menu.addMenu("大小调整")
 
         action_scale_reset = QAction('还原原大小', self.parent)
         action_scale_reset.triggered.connect(
@@ -417,7 +417,7 @@ class PetActions:
 
         # 构造顶层选项
         setting_label = [
-            {'label': '放大缩小', 'action': scale_sub_items},
+            {'label': '大小调整', 'action': scale_sub_items},
             {'label': '下落模式', 'action': fall_mode_sub_items},
             {'label': '关闭自启动' if startup.is_startup_enabled() else '开启自启动', 'action': self.toggle_startup},
         ]
