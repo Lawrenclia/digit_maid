@@ -10,6 +10,7 @@ ICONSET_DIR="$BUILD_DIR/${APP_NAME}.iconset"
 ICNS_PATH="$BUILD_DIR/${APP_NAME}.icns"
 APP_PATH="dist/${APP_NAME}.app"
 DMG_PATH="dist/${APP_NAME}.dmg"
+DMG_STAGING_DIR="build/dmg_staging"
 
 PYTHON_EXE="${DM_PYTHON:-}"
 if [[ -z "$PYTHON_EXE" ]]; then
@@ -68,7 +69,12 @@ echo "[3/5] Building macOS app with icon"
 
 echo "[4/5] Packing DMG"
 rm -f "$DMG_PATH"
-hdiutil create -volname "$APP_NAME" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_PATH"
+rm -rf "$DMG_STAGING_DIR"
+mkdir -p "$DMG_STAGING_DIR"
+cp -R "$APP_PATH" "$DMG_STAGING_DIR/"
+ln -s /Applications "$DMG_STAGING_DIR/Applications"
+
+hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGING_DIR" -ov -format UDZO "$DMG_PATH"
 
 echo "[5/5] Done"
 echo "App: $APP_PATH"
