@@ -40,6 +40,7 @@ class MaidWindow(QWidget):
         self.current_action = "idle"
         self._edge_hidden = False
         self._edge_hidden_side = None
+        self._todo_panel_open = False
 
         # 统一管理菜单可见状态与操作权限
         self.menu_controller = OptionMenuController()
@@ -130,8 +131,11 @@ class MaidWindow(QWidget):
         if getattr(self, "menu_interact_mode", False):
             return True
 
+        if getattr(self, "_todo_panel_open", False):
+            return True
+
         controller = getattr(self, "menu_controller", None)
-        if controller is not None and controller.is_menu_open:
+        if controller is not None and controller.is_ui_locked:
             return True
 
         if getattr(self, "_list_menu_open", False):
@@ -140,6 +144,10 @@ class MaidWindow(QWidget):
         actions = getattr(self, "maid_actions", None)
         if actions is None:
             return False
+
+        todo_panel = getattr(actions, "todo_panel", None)
+        if todo_panel is not None and bool(getattr(todo_panel, "isVisible", lambda: False)()):
+            return True
 
         circular_menu = getattr(actions, "circular_menu", None)
         if circular_menu is None:
@@ -1125,6 +1133,23 @@ class MaidWindow(QWidget):
                 self._stop_inactivity_timer()
               
         elif event.button() == Qt.MouseButton.RightButton:
+            todo_open = bool(getattr(self, "_todo_panel_open", False))
+            controller = getattr(self, "menu_controller", None)
+            if controller is not None and getattr(controller, "is_todo_panel_open", False):
+                todo_open = True
+
+            todo_panel = getattr(self.maid_actions, "todo_panel", None)
+            if todo_panel is not None and bool(getattr(todo_panel, "isVisible", lambda: False)()):
+                todo_open = True
+
+            if todo_open:
+                self.menu_interact_mode = True
+                self._stop_inactivity_timer(reset_stage=True)
+                self.wander_timer.stop()
+                self.play_action("interact", force_loop=True)
+                self.dialogue_system.show_message("待办", "请先点击待办框右上角关闭按钮。")
+                return
+
             if not self._is_at_bottom_boundary() and not self._allow_air_interaction():
                 return
 

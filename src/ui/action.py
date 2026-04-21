@@ -8,6 +8,7 @@ from src.input import choice_dialog
 from src.input.choice_dialog import load_dialog_theme
 from src.input.circular_menu import CircularMenuWidget
 from .menu_controller import OptionMenuController
+from .todo_panel import TodoPanel
 
 class MaidActions:
     FALL_MODE_LABELS = {
@@ -24,10 +25,13 @@ class MaidActions:
     def __init__(self, parent_widget, dialogue_system):
         self.parent = parent_widget
         self.dialogue = dialogue_system
+        self.todo_panel = None
         if not hasattr(self.parent, "menu_controller"):
             self.parent.menu_controller = OptionMenuController()
         if not hasattr(self.parent, "_list_menu_open"):
             self.parent._list_menu_open = False
+        if not hasattr(self.parent, "_todo_panel_open"):
+            self.parent._todo_panel_open = False
 
     def _set_list_menu_open_state(self, is_open):
         is_open = bool(is_open)
@@ -40,6 +44,90 @@ class MaidActions:
         controller = getattr(self.parent, "menu_controller", None)
         if controller is not None:
             controller.set_circular_menu_open(bool(is_open))
+
+    def _set_todo_panel_open_state(self, is_open):
+        is_open = bool(is_open)
+        self.parent._todo_panel_open = is_open
+        controller = getattr(self.parent, "menu_controller", None)
+        if controller is not None:
+            controller.set_todo_panel_open(is_open)
+
+    def _is_todo_panel_visible(self):
+        panel = getattr(self, "todo_panel", None)
+        if panel is None:
+            return False
+        return bool(getattr(panel, "isVisible", lambda: False)())
+
+    def _position_todo_panel(self, panel):
+        anchor = self.parent.mapToGlobal(self.parent.rect().center())
+        screen = QApplication.screenAt(anchor)
+        if screen is None:
+            screen = self.parent.screen()
+        if screen is None:
+            screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+
+        geo = screen.availableGeometry()
+        x = self.parent.x() + self.parent.width() + 18
+        y = self.parent.y() - 10
+
+        if x + panel.width() > geo.right():
+            x = self.parent.x() - panel.width() - 18
+
+        x = max(geo.left(), min(x, geo.right() - panel.width() + 1))
+        y = max(geo.top(), min(y, geo.bottom() - panel.height() + 1))
+        panel.move(int(x), int(y))
+
+    def show_todo_panel(self):
+        if getattr(self.parent, "_custom_scale_adjusting", False):
+            self.dialogue.show_message("待办", "请先点击“保存”或“返回”结束自定义大小。")
+            return False
+
+        if self._is_todo_panel_visible():
+            self._set_todo_panel_open_state(True)
+            self.parent.menu_interact_mode = True
+            self.todo_panel.reload_data()
+            self.todo_panel.raise_()
+            self.todo_panel.activateWindow()
+            return True
+
+        if self.todo_panel is None:
+            self.todo_panel = TodoPanel(on_close_callback=self.on_todo_panel_closed, parent=self.parent)
+        else:
+            self.todo_panel.on_close_callback = self.on_todo_panel_closed
+            self.todo_panel.reload_data()
+
+        if hasattr(self.parent, "_stop_inactivity_timer"):
+            self.parent._stop_inactivity_timer(reset_stage=True)
+        if hasattr(self.parent, "wander_timer"):
+            self.parent.wander_timer.stop()
+        if getattr(self.parent, "_is_falling", False) and hasattr(self.parent, "_stop_fall"):
+            self.parent._stop_fall()
+
+        self.parent.menu_interact_mode = True
+        self._set_todo_panel_open_state(True)
+        self.parent.play_action("interact", force_loop=True)
+
+        self._position_todo_panel(self.todo_panel)
+        self.todo_panel.show()
+        self.todo_panel.raise_()
+        self.todo_panel.activateWindow()
+        return True
+
+    def on_todo_panel_closed(self):
+        self._set_todo_panel_open_state(False)
+
+        controller = getattr(self.parent, "menu_controller", None)
+        if controller is not None and controller.is_menu_open:
+            self.parent.menu_interact_mode = True
+            self.parent.play_action("interact", force_loop=True)
+            return
+
+        self.parent.menu_interact_mode = False
+        self.parent.play_action("idle")
+        if hasattr(self.parent, "force_on_top"):
+            self.parent.force_on_top()
 
     def _get_maid_animation_cfg_path(self):
         return os.path.join(os.path.dirname(__file__), "maid_animations.yaml")
@@ -256,6 +344,10 @@ class MaidActions:
         return max(0.4, mapped)
 
     def show_context_menu(self, global_pos):
+        if self._is_todo_panel_visible() or getattr(self.parent, "_todo_panel_open", False):
+            self.show_todo_panel()
+            return
+
         # 拦截：如果气泡菜单已经存在并且开着，重复右击则关闭它（相当于开关切换）
         if hasattr(self, "circular_menu") and self.circular_menu is not None:
             if getattr(self.circular_menu, "isVisible", lambda: False)():
@@ -351,6 +443,10 @@ class MaidActions:
         action_screenshot = QAction('截图', self.parent)
         action_screenshot.triggered.connect(self.do_screenshot)
         menu.addAction(action_screenshot)
+
+        action_todo = QAction('待办', self.parent)
+        action_todo.triggered.connect(self.show_todo_panel)
+        menu.addAction(action_todo)
 
         settings_menu = menu.addMenu("设置")
 
@@ -467,6 +563,11 @@ class MaidActions:
                     self.parent.force_on_top()
                 return
 
+            if self._is_todo_panel_visible() or getattr(self.parent, "_todo_panel_open", False):
+                self.parent.menu_interact_mode = True
+                self.parent.play_action("interact", force_loop=True)
+                return
+
             # 阻塞调用结束，手动恢复桌宠的状态
             self.parent.menu_interact_mode = False
             self.parent.play_action("idle")
@@ -555,6 +656,7 @@ class MaidActions:
         top_items = [
             {'label': 'APP', 'action': app_sub_items},
             {'label': 'TOOL', 'action': tools_sub_items},
+            {'label': '待办', 'action': self.show_todo_panel},
             {'label': "设置", 'action': setting_label},
             {'label': '关闭', 'action': self.trigger_quit}
         ]
@@ -581,6 +683,11 @@ class MaidActions:
             self.parent.play_action("interact", force_loop=True)
             if hasattr(self.parent, "force_on_top"):
                 self.parent.force_on_top()
+            return
+
+        if self._is_todo_panel_visible() or getattr(self.parent, "_todo_panel_open", False):
+            self.parent.menu_interact_mode = True
+            self.parent.play_action("interact", force_loop=True)
             return
 
         # 菜单关闭后恢复桌宠状态

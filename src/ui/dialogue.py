@@ -8,7 +8,7 @@ from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QPainterPath, QFont, QTe
 from src.input.choice_dialog import load_dialog_theme
 
 
-UI_FONT_FAMILY = "PingFang SC" if sys.platform == "darwin" else "Microsoft YaHei"
+UI_FONT_FAMILY = "Microsoft YaHei"
 
 class OutlineLabel(QLabel):
     def __init__(self, text="", enable_outline=True, parent=None):
@@ -76,7 +76,9 @@ class SpeechBubble(QWidget):
         self.label.setWordWrap(True)
         # 支持 HTML 格式 (比如标题加粗)
         self.label.setTextFormat(Qt.TextFormat.RichText) 
-        self.label.setFont(QFont(UI_FONT_FAMILY, 10))
+        init_font = QFont(UI_FONT_FAMILY, 10)
+        init_font.setBold(True)
+        self.label.setFont(init_font)
         
         if self.outline_dialog_text:
             self.label.setStyleSheet("color: transparent;") # 隐藏自带的字，只保留自定义边框文字
@@ -135,7 +137,9 @@ class SpeechBubble(QWidget):
         self.ui_scale = ui_scale
 
         font_px = max(6, int(round(10 * self.ui_scale)))
-        self.label.setFont(QFont(UI_FONT_FAMILY, font_px))
+        scaled_font = QFont(UI_FONT_FAMILY, font_px)
+        scaled_font.setBold(True)
+        self.label.setFont(scaled_font)
 
         max_width = max(100, int(round(250 * self.ui_scale)))
         self.setMaximumWidth(max_width)
