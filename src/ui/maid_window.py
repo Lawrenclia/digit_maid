@@ -119,6 +119,7 @@ class MaidWindow(QWidget):
             
         self._reset_inactivity_timer()
 
+#--------------------------------窗口层级与菜单状态----------------------------------------
     def _keep_on_top(self):
         if self.is_macos:
             return
@@ -155,6 +156,7 @@ class MaidWindow(QWidget):
             return True
         return controller.allows(operation_name)
 
+#--------------------------------贴边隐藏逻辑----------------------------------------
     def _edge_hide_side_for_x(self, x=None, tolerance=2):
         if x is None:
             x = self.x()
@@ -231,6 +233,7 @@ class MaidWindow(QWidget):
             self._reset_inactivity_timer()
         return True
 
+#--------------------------------窗口初始化与动画配置----------------------------------------
     def initUI(self):
         # ... (保持不变)
         flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
@@ -455,7 +458,7 @@ class MaidWindow(QWidget):
             self._reset_inactivity_timer()
             
         return True
-
+#--------------------------------大小调整--------------------------------
     def _get_target_maid_size(self):
         if self._source_frame_size is not None and not self._source_frame_size.isEmpty():
             base_width = max(1, int(round(self._source_frame_size.width() * self.base_render_scale)))
@@ -648,6 +651,7 @@ class MaidWindow(QWidget):
         self.move(new_x, new_y)
         return True
 
+#--------------------------------动画帧回调与动作收尾--------------------------------
     def _on_frame_changed(self, frame_number):
         sender_movie = self.sender()
         if sender_movie is None or sender_movie is not self.current_movie:
@@ -715,6 +719,7 @@ class MaidWindow(QWidget):
                 if self.current_action != "idle":
                     self.play_action("idle")
 
+#--------------------------------待机状态机--------------------------------
     def _on_wander_tick(self):
         if self._edge_hidden:
             self.wander_timer.stop()
@@ -911,6 +916,7 @@ class MaidWindow(QWidget):
         self.play_action("sleep")
         self._stop_inactivity_timer(reset_stage=False)
 
+#--------------------------------下落与边界判定--------------------------------
     def _bottom_y_limit(self):
         screen_geo = self.screen().availableGeometry()
         return screen_geo.bottom() - self.height() + 10
@@ -1074,6 +1080,7 @@ class MaidWindow(QWidget):
         self._fall_x = min(max(self._fall_x, min_x), max_x)
         self.move(int(round(new_x)), int(round(self._fall_y)))
 
+#--------------------------------鼠标交互事件--------------------------------
     def mousePressEvent(self, event):
         if self._edge_hidden:
             if event.button() == Qt.MouseButton.LeftButton:
@@ -1262,6 +1269,7 @@ class MaidWindow(QWidget):
 
         super().wheelEvent(event)
 
+#--------------------------------窗口控制事件--------------------------------
     def force_on_top(self):
         """强制将窗口保持在屏幕最顶层"""
         # macOS 下避免主动抢焦点，防止影响其他应用操作。
