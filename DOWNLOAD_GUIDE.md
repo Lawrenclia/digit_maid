@@ -28,8 +28,8 @@
 如果你遇到以下提示之一：
 - “无法验证开发者”
 - “Apple 无法检查其是否包含恶意软件”
-  <img src="./DOWNLOAD_image/mac02.png" alt="macOS 拦截提示" width="460" />
-  请按下面步骤在“隐私与安全性”中放行：
+<img src="./DOWNLOAD_image/mac02.png" alt="macOS 拦截提示" width="460" />
+请按下面步骤在“隐私与安全性”中放行：
 
 1. 打开“系统设置” -> “隐私与安全性”。
 2. 向下滚动到“安全性”区域。
