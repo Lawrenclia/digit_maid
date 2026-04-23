@@ -1,8 +1,9 @@
 from datetime import date
 import os
+import sys
 
 from PyQt6.QtCore import QDate, QEvent, QPoint, QRect, QSize, Qt, QTimer, QPropertyAnimation
-from PyQt6.QtGui import QColor, QFont, QIcon, QTextCharFormat
+from PyQt6.QtGui import QColor, QFont, QIcon, QTextCharFormat, QCursor
 from PyQt6.QtWidgets import (
     QAbstractItemDelegate,
     QAbstractItemView,
@@ -20,6 +21,12 @@ from PyQt6.QtWidgets import (
 )
 
 from src.function.todo_store import load_todo_items_by_date, save_todo_items_by_date
+
+
+def _default_ui_font_family():
+    if sys.platform == "darwin":
+        return "PingFang SC"
+    return "Microsoft YaHei"
 
 
 class TodoPanel(QWidget):
@@ -62,7 +69,7 @@ class TodoPanel(QWidget):
 
         card = QFrame(self)
         card.setObjectName("todo_card")
-        card.setStyleSheet(
+        card_style = (
             """
             QFrame#todo_card {
                 background-color: #ffffff;
@@ -70,7 +77,7 @@ class TodoPanel(QWidget):
                 border-radius: 18px;
             }
             QFrame#todo_card * {
-                font-family: "Microsoft YaHei";
+                font-family: "__UI_FONT_FAMILY__";
                 font-weight: 700;
             }
             QLabel#title_label {
@@ -204,8 +211,20 @@ class TodoPanel(QWidget):
                 selection-color: #5b4300;
                 outline: 0;
             }
+            /* 新增：强化日历所有子部件背景为白色 */
+            QCalendarWidget QAbstractItemView {
+                background-color: #ffffff;
+                alternate-background-color: #ffffff;
+            }
+            QCalendarWidget QWidget#qt_calendar_navigationbar {
+                background-color: #ffffff;
+            }
+            QCalendarWidget QToolButton {
+                background-color: transparent;
+            }
             """
         )
+        card.setStyleSheet(card_style.replace("__UI_FONT_FAMILY__", _default_ui_font_family()))
 
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(18, 16, 18, 16)
@@ -268,7 +287,7 @@ class TodoPanel(QWidget):
 
         self.delete_btn = QPushButton("", self.today_list)
         self.delete_btn.setObjectName("icon_action_btn")
-        self.delete_btn.setToolTip("删除当前选中事项")
+        # self.delete_btn.setToolTip("删除当前选中事项")
         self.delete_btn.clicked.connect(self._delete_selected_item)
         self.delete_btn.setFixedSize(24, 24)
         self.delete_btn.hide()
@@ -278,7 +297,7 @@ class TodoPanel(QWidget):
         input_action_row.setSpacing(8)
 
         self.todo_input = QLineEdit(left_section)
-        self.todo_input.setPlaceholderText("输入当日待办，回车可直接上传")
+        self.todo_input.setPlaceholderText("输入当日待办")
         self.todo_input.returnPressed.connect(self._submit_todo_input)
         input_action_row.addWidget(self.todo_input, 1)
 
@@ -356,24 +375,53 @@ class TodoPanel(QWidget):
     def _resolve_screen_geometry(self, probe_point=None):
         if probe_point is None:
             probe_point = self.frameGeometry().center()
+
         screen = QApplication.screenAt(probe_point)
+        if screen is None:
+            screen = self.screen()
+        if screen is None and self.owner_widget is not None:
+            screen = self.owner_widget.screen()
         if screen is None:
             screen = QApplication.primaryScreen()
         if screen is None:
             return QRect(0, 0, 1, 1)
         return screen.availableGeometry()
 
-    def _clamp_top_left(self, top_left, width=None, height=None):
+    def _clamp_top_left(self, top_left, width=None, height=None, reference_point=None):
         if width is None:
             width = self.width()
         if height is None:
             height = self.height()
 
-        probe = QPoint(top_left.x() + width // 2, top_left.y() + height // 2)
+        if reference_point is not None:
+            probe = reference_point
+        else:
+            probe = QPoint(top_left.x() + width // 2, top_left.y() + height // 2)
         screen_geo = self._resolve_screen_geometry(probe)
         x = max(screen_geo.left(), min(top_left.x(), screen_geo.right() - width + 1))
         y = max(screen_geo.top(), min(top_left.y(), screen_geo.bottom() - height + 1))
         return QPoint(x, y)
+
+    def keep_inside_screen(self, reference_point=None):
+        current_top_left = self.pos()
+        clamped = self._clamp_top_left(current_top_left, reference_point=reference_point)
+        if clamped != current_top_left:
+            self.move(clamped)
+
+    def _start_drag(self, global_pos):
+        self._dragging = True
+        self._drag_offset = global_pos - self.frameGeometry().topLeft()
+        mouse_grabber_getter = getattr(QWidget, "mouseGrabber", None)
+        current_grabber = mouse_grabber_getter() if callable(mouse_grabber_getter) else None
+        if current_grabber is not self:
+            self.grabMouse()
+
+    def _stop_drag(self):
+        self._dragging = False
+        mouse_grabber_getter = getattr(QWidget, "mouseGrabber", None)
+        current_grabber = mouse_grabber_getter() if callable(mouse_grabber_getter) else None
+        if current_grabber is self:
+            self.releaseMouse()
 
     def _animate_width_to(self, target_width, on_finished=None):
         start_geo = self.geometry()
@@ -465,7 +513,7 @@ class TodoPanel(QWidget):
         selected = self._selected_date_qdate()
         self.left_title.setText(f"每日任务 ({selected.toString('yyyy-MM-dd')})")
         self.todo_input.setPlaceholderText(
-            f"输入 {selected.toString('MM-dd')} 待办，回车可直接上传"
+            f"输入 {selected.toString('MM-dd')} 待办"
         )
 
     def _submit_todo_input(self):
@@ -524,7 +572,7 @@ class TodoPanel(QWidget):
             self._position_selected_delete_button()
             self.today_list.editItem(item)
             QTimer.singleShot(0, self._bind_today_inline_editor)
-            self._set_status_text("已进入列表内编辑，回车可保存")
+            self._set_status_text("已进入列表内编辑")
 
     def _bind_today_inline_editor(self):
         editor = self.today_list.findChild(QLineEdit)
@@ -660,6 +708,7 @@ class TodoPanel(QWidget):
 
         out_month_format = QTextCharFormat()
         out_month_format.setBackground(QColor("#f1f1f1"))
+        out_month_format.setForeground(QColor("#2f2220"))
 
         for idx in range(42):
             qdate = grid_start.addDays(idx)
@@ -670,6 +719,7 @@ class TodoPanel(QWidget):
 
         month_light_format = QTextCharFormat()
         month_light_format.setBackground(QColor("#fff1ef"))
+        month_light_format.setForeground(QColor("#2f2220"))
 
         for day in range(1, day_count + 1):
             qdate = QDate(shown_year, shown_month, day)
@@ -678,6 +728,7 @@ class TodoPanel(QWidget):
 
         task_format = QTextCharFormat()
         task_format.setBackground(QColor("#ffcdc8"))
+        task_format.setForeground(QColor("#2f2220"))
 
         for date_key, tasks in self.items_by_date.items():
             if not tasks:
@@ -698,6 +749,7 @@ class TodoPanel(QWidget):
         if today.year() == shown_year and today.month() == shown_month:
             today_format = QTextCharFormat()
             today_format.setBackground(QColor("#ff9a91"))
+            today_format.setForeground(QColor("#2f2220"))
             self.calendar.setDateTextFormat(today, today_format)
             self._marked_dates.append(today)
 
@@ -705,6 +757,7 @@ class TodoPanel(QWidget):
         if selected.isValid():
             selected_format = QTextCharFormat()
             selected_format.setBackground(QColor("#ffe36e"))
+            selected_format.setForeground(QColor("#2f2220"))
             self.calendar.setDateTextFormat(selected, selected_format)
             self._marked_dates.append(selected)
 
@@ -741,6 +794,7 @@ class TodoPanel(QWidget):
             self.expand_btn.setText("展开日历")
 
     def _close_from_symbol(self):
+        self._stop_drag()
         if callable(self.on_close_callback):
             self.on_close_callback()
         self._allow_close = True
@@ -758,20 +812,19 @@ class TodoPanel(QWidget):
 
         if obj in self._drag_handles:
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
-                self._dragging = True
-                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                self._start_drag(event.globalPosition().toPoint())
                 event.accept()
                 return True
 
             if event.type() == QEvent.Type.MouseMove and self._dragging and (event.buttons() & Qt.MouseButton.LeftButton):
                 new_top_left = event.globalPosition().toPoint() - self._drag_offset
-                clamped = self._clamp_top_left(new_top_left)
+                clamped = self._clamp_top_left(new_top_left, reference_point=event.globalPosition().toPoint())
                 self.move(clamped)
                 event.accept()
                 return True
 
             if event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
-                self._dragging = False
+                self._stop_drag()
                 event.accept()
                 return True
 
@@ -780,7 +833,7 @@ class TodoPanel(QWidget):
     def mouseMoveEvent(self, event):
         if self._dragging and (event.buttons() & Qt.MouseButton.LeftButton):
             new_top_left = event.globalPosition().toPoint() - self._drag_offset
-            clamped = self._clamp_top_left(new_top_left)
+            clamped = self._clamp_top_left(new_top_left, reference_point=event.globalPosition().toPoint())
             self.move(clamped)
             event.accept()
             return
@@ -788,8 +841,12 @@ class TodoPanel(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self._dragging = False
+            self._stop_drag()
         super().mouseReleaseEvent(event)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.keep_inside_screen(reference_point=QCursor.pos())
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
@@ -798,6 +855,7 @@ class TodoPanel(QWidget):
         super().keyPressEvent(event)
 
     def closeEvent(self, event):
+        self._stop_drag()
         app = QApplication.instance()
         app_closing = bool(app.closingDown()) if app is not None else False
         if not self._allow_close and not app_closing:

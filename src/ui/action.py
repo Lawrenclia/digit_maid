@@ -1,6 +1,6 @@
 ﻿from PyQt6.QtWidgets import QMenu, QApplication
 from PyQt6.QtGui import QAction, QActionGroup
-from PyQt6.QtCore import QTimer, QObject, QEvent, QPoint, QSettings
+from PyQt6.QtCore import QTimer, QObject, QEvent, QPoint, QSettings, Qt
 import os
 from src.function import screen_shot, open_app, startup
 from src.function.open_app import load_app_paths
@@ -11,6 +11,8 @@ from .menu_controller import OptionMenuController
 from .todo_panel import TodoPanel
 
 class MaidActions:
+    MENU_VERTICAL_OFFSET_PX = 24
+
     FALL_MODE_LABELS = {
         "smooth": "缓降飘落",
         "direct": "快速直落",
@@ -85,8 +87,6 @@ class MaidActions:
             return False
 
         if self._is_todo_panel_visible():
-            self._set_todo_panel_open_state(True)
-            self.parent.menu_interact_mode = True
             self.todo_panel.raise_()
             self.todo_panel.activateWindow()
             return True
@@ -96,17 +96,6 @@ class MaidActions:
         else:
             self.todo_panel.on_close_callback = self.on_todo_panel_closed
 
-        if hasattr(self.parent, "_stop_inactivity_timer"):
-            self.parent._stop_inactivity_timer(reset_stage=True)
-        if hasattr(self.parent, "wander_timer"):
-            self.parent.wander_timer.stop()
-        if getattr(self.parent, "_is_falling", False) and hasattr(self.parent, "_stop_fall"):
-            self.parent._stop_fall()
-
-        self.parent.menu_interact_mode = True
-        self._set_todo_panel_open_state(True)
-        self.parent.play_action("interact", force_loop=True)
-
         self._position_todo_panel(self.todo_panel)
         self.todo_panel.show()
         self.todo_panel.raise_()
@@ -115,15 +104,6 @@ class MaidActions:
 
     def on_todo_panel_closed(self):
         self._set_todo_panel_open_state(False)
-
-        controller = getattr(self.parent, "menu_controller", None)
-        if controller is not None and controller.is_menu_open:
-            self.parent.menu_interact_mode = True
-            self.parent.play_action("interact", force_loop=True)
-            return
-
-        self.parent.menu_interact_mode = False
-        self.parent.play_action("idle")
         if hasattr(self.parent, "force_on_top"):
             self.parent.force_on_top()
 
@@ -174,6 +154,10 @@ class MaidActions:
             self.parent.anim_cfg["fall_mode"] = mode
             self.parent.anim_cfg["smooth_fall"] = (mode == "smooth")
 
+        # 新增：将当前下落模式保存到 QSettings，实现重启后记忆
+        settings = QSettings("DigitMaid", "DigitMaid")
+        settings.setValue("mode/fall_mode", mode)
+
         if mode == "none" and getattr(self.parent, "_is_falling", False):
             if hasattr(self.parent, "_stop_fall"):
                 self.parent._stop_fall()
@@ -181,7 +165,6 @@ class MaidActions:
 
         self.dialogue.show_message("下落模式", f"已切换为: {self.FALL_MODE_LABELS[mode]}")
         return True
-
     def _get_current_idle_mode(self):
         anim_cfg = getattr(self.parent, "anim_cfg", {}) or {}
         mode = str(anim_cfg.get("idle_mode", "")).strip().lower()
@@ -335,6 +318,17 @@ class MaidActions:
         min_scale_for_center = 0.4
         min_center_y = int(round(bottom_y - (base_height * min_scale_for_center) / 2.0))
         center_y = min(current_center.y(), min_center_y)
+        center_y -= self.MENU_VERTICAL_OFFSET_PX
+
+        screen = QApplication.screenAt(current_center)
+        if screen is None:
+            screen = self.parent.screen()
+        if screen is None:
+            screen = QApplication.primaryScreen()
+        if screen is not None:
+            geo = screen.availableGeometry()
+            center_y = max(geo.top(), center_y)
+
         return QPoint(current_center.x(), center_y)
 
     def _menu_scale_from_maid_scale(self, maid_scale):
@@ -350,11 +344,21 @@ class MaidActions:
             mapped = scale
         return max(0.4, mapped)
 
-    def show_context_menu(self, global_pos):
-        if self._is_todo_panel_visible() or getattr(self.parent, "_todo_panel_open", False):
-            self.show_todo_panel()
-            return
+    def _shift_menu_anchor_up(self, anchor_point):
+        shifted = QPoint(anchor_point)
+        shifted.setY(shifted.y() - self.MENU_VERTICAL_OFFSET_PX)
 
+        screen = QApplication.screenAt(anchor_point)
+        if screen is None:
+            screen = self.parent.screen()
+        if screen is None:
+            screen = QApplication.primaryScreen()
+        if screen is not None:
+            geo = screen.availableGeometry()
+            shifted.setY(max(geo.top(), shifted.y()))
+        return shifted
+
+    def show_context_menu(self, global_pos):
         # 拦截：如果气泡菜单已经存在并且开着，重复右击则关闭它（相当于开关切换）
         if hasattr(self, "circular_menu") and self.circular_menu is not None:
             if getattr(self.circular_menu, "isVisible", lambda: False)():
@@ -376,6 +380,11 @@ class MaidActions:
         self._set_circular_menu_open_state(False)
 
         menu = QMenu(self.parent)
+        menu.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        if getattr(self.parent, "is_macos", False):
+            always_show_attr = getattr(Qt.WidgetAttribute, "WA_MacAlwaysShowToolWindow", None)
+            if always_show_attr is not None:
+                menu.setAttribute(always_show_attr, True)
         scale = self._menu_scale_from_maid_scale(getattr(self.parent, "user_scale", 1.0))
         border_px = max(1, int(2 * scale))
         radius_px = max(6, int(10 * scale))
@@ -566,7 +575,8 @@ class MaidActions:
 
         self._set_list_menu_open_state(True)
         try:
-            menu.exec(global_pos)
+            QTimer.singleShot(0, menu.raise_)
+            menu.exec(self._shift_menu_anchor_up(global_pos))
 
             if getattr(self.parent, "_custom_scale_adjusting", False):
                 # 预览态下若菜单意外关闭，不要回 idle；保持交互态，允许继续滚轮调节后再手动保存/退出
@@ -574,11 +584,6 @@ class MaidActions:
                 self.parent.play_action("interact", force_loop=True)
                 if hasattr(self.parent, "force_on_top"):
                     self.parent.force_on_top()
-                return
-
-            if self._is_todo_panel_visible() or getattr(self.parent, "_todo_panel_open", False):
-                self.parent.menu_interact_mode = True
-                self.parent.play_action("interact", force_loop=True)
                 return
 
             # 阻塞调用结束，手动恢复桌宠的状态
@@ -694,6 +699,8 @@ class MaidActions:
             parent=self.parent
         )
         self.circular_menu.show()
+        self.circular_menu.raise_()
+        self.circular_menu.activateWindow()
         self._set_circular_menu_open_state(True)
         
     def on_circular_menu_closed(self):
@@ -704,11 +711,6 @@ class MaidActions:
             self.parent.play_action("interact", force_loop=True)
             if hasattr(self.parent, "force_on_top"):
                 self.parent.force_on_top()
-            return
-
-        if self._is_todo_panel_visible() or getattr(self.parent, "_todo_panel_open", False):
-            self.parent.menu_interact_mode = True
-            self.parent.play_action("interact", force_loop=True)
             return
 
         # 菜单关闭后恢复桌宠状态
