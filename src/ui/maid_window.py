@@ -78,6 +78,14 @@ class MaidWindow(QWidget):
         self._scale_preview_tip_timer.setSingleShot(True)
         self._scale_preview_tip_timer.timeout.connect(self._on_scale_preview_stop)
         self._scale_preview_tip_delay_ms = 450
+        self._keyboard_control_mode = False
+        self._keyboard_move_step = 6
+        self._keyboard_move_interval_ms = 16
+        self._keyboard_move_direction = 0
+        self._keyboard_fly_active = False
+        self._keyboard_fly_step = 4
+        self._keyboard_move_timer = QTimer(self)
+        self._keyboard_move_timer.timeout.connect(self._on_keyboard_move_tick)
 
         # 空闲状态机：由 idle_mode 决定后续是 move/sit/sleep 的哪种组合。
         self.inactivity_stage = 0
@@ -257,6 +265,7 @@ class MaidWindow(QWidget):
             always_show_attr = getattr(Qt.WidgetAttribute, "WA_MacAlwaysShowToolWindow", None)
             if always_show_attr is not None:
                 self.setAttribute(always_show_attr, True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         
         # 获取屏幕尺寸
         screen = QApplication.primaryScreen().availableGeometry()
@@ -612,6 +621,173 @@ class MaidWindow(QWidget):
         if hasattr(menu, "sync_menu_scale_from_maid"):
             menu.sync_menu_scale_from_maid()
 
+    def start_keyboard_control_mode(self):
+        if getattr(self, "_custom_scale_adjusting", False):
+            return False, "请先点击“保存”或“返回”结束自定义大小。"
+
+        if getattr(self, "_is_falling", False):
+            self._stop_fall()
+
+        self._keyboard_control_mode = True
+        self._keyboard_move_direction = 0
+        self._keyboard_fly_active = False
+        self._keyboard_move_timer.stop()
+        self.menu_interact_mode = True
+        self._stop_inactivity_timer(reset_stage=True)
+        self.wander_timer.stop()
+        self._ensure_keyboard_stand_animation()
+        self.force_on_top()
+        self.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+        return True, "控制移动已开启：按 A / D 移动，按 Esc 退出。"
+
+    def stop_keyboard_control_mode(self, show_tip=False):
+        if not self._keyboard_control_mode:
+            return False, "控制移动未开启。"
+
+        self._keyboard_control_mode = False
+        self._keyboard_move_direction = 0
+        self._keyboard_fly_active = False
+        self._keyboard_move_timer.stop()
+
+        if not self._is_at_bottom_boundary() and not self._allow_air_interaction():
+            self._start_fall_to_bottom()
+
+        controller = getattr(self, "menu_controller", None)
+        menu_open = controller.is_menu_open if controller is not None else False
+        if menu_open or self._custom_scale_adjusting:
+            self.menu_interact_mode = True
+            self.play_action("interact", force_loop=True)
+        else:
+            self.menu_interact_mode = False
+            if self.current_action != "idle":
+                self.play_action("idle")
+            else:
+                self._reset_inactivity_timer()
+
+        if show_tip:
+            self.dialogue_system.show_message("控制移动", "已退出控制移动。")
+        return True, "已退出控制移动。"
+
+    def _move_by_keyboard_step(self, direction):
+        if not self._keyboard_control_mode:
+            return False
+
+        if direction == 0:
+            return False
+
+        self._set_facing_by_direction(direction)
+
+        if (
+            not self._is_at_bottom_boundary()
+            and not self._allow_air_interaction()
+            and not self._keyboard_fly_active
+            and not self._is_falling
+        ):
+            self._start_fall_to_bottom()
+            return False
+
+        screen_geo = self.screen().availableGeometry()
+        offset = self._keyboard_move_step if direction > 0 else -self._keyboard_move_step
+        new_x = self.x() + offset
+        min_x = screen_geo.left()
+        max_x = screen_geo.right() - self.width()
+        new_x = max(min_x, min(new_x, max_x))
+
+        if new_x == self.x():
+            return False
+
+        if not self._keyboard_fly_active and not self._is_falling:
+            self._ensure_keyboard_move_animation(direction)
+        self.move(new_x, self.y())
+        return True
+
+    def _ensure_keyboard_move_animation(self, direction):
+        expected_flipped = direction < 0
+        current_flipped = bool(getattr(self, "is_flipped", False))
+        if self.current_action != "move" or current_flipped != expected_flipped:
+            self.play_action("move", force_loop=True, is_flipped=expected_flipped)
+
+    def _set_facing_by_direction(self, direction):
+        if direction == 0:
+            return
+
+        expected_flipped = direction < 0
+        if bool(getattr(self, "is_flipped", False)) == expected_flipped:
+            return
+
+        self.is_flipped = expected_flipped
+        if self.current_movie is None:
+            return
+
+        if self.is_flipped:
+            pixmap = self.current_movie.currentPixmap()
+            if not pixmap.isNull():
+                self.maid_label.setPixmap(pixmap.transformed(self._flip_transform))
+        else:
+            self.maid_label.setMovie(self.current_movie)
+
+    def _ensure_keyboard_stand_animation(self):
+        if self.current_action != "idle":
+            self.play_action("idle", force_loop=True)
+
+    def _move_up_by_keyboard_step(self):
+        if not self._keyboard_control_mode:
+            return False
+
+        if getattr(self, "_is_falling", False):
+            self._stop_fall()
+
+        screen_geo = self.screen().availableGeometry()
+        new_y = max(screen_geo.top(), self.y() - self._keyboard_fly_step)
+        if new_y == self.y():
+            return False
+
+        if self.current_action != "fly":
+            self.play_action("fly", force_loop=True)
+
+        self.move(self.x(), new_y)
+        return True
+
+    def _set_keyboard_move_direction(self, direction):
+        if not self._keyboard_control_mode:
+            return False
+
+        direction = -1 if direction < 0 else (1 if direction > 0 else 0)
+        self._keyboard_move_direction = direction
+        if direction == 0:
+            if not self._keyboard_fly_active:
+                self._keyboard_move_timer.stop()
+            if not self._keyboard_fly_active:
+                self._ensure_keyboard_stand_animation()
+            return True
+
+        self._move_by_keyboard_step(direction)
+        if not self._keyboard_move_timer.isActive():
+            self._keyboard_move_timer.start(self._keyboard_move_interval_ms)
+        return True
+
+    def _on_keyboard_move_tick(self):
+        if not self._keyboard_control_mode:
+            self._keyboard_move_timer.stop()
+            return
+
+        if self._keyboard_fly_active:
+            self._move_up_by_keyboard_step()
+
+        direction = int(getattr(self, "_keyboard_move_direction", 0))
+        if direction == 0 and not self._keyboard_fly_active:
+            self._keyboard_move_timer.stop()
+            self._ensure_keyboard_stand_animation()
+            return
+
+        moved = True
+        if direction != 0:
+            moved = self._move_by_keyboard_step(direction)
+
+        if not moved and not self._keyboard_fly_active:
+            self._keyboard_move_timer.stop()
+            self._ensure_keyboard_stand_animation()
+
     def set_maid_scale_factor(self, value):
         try:
             target_scale = float(value)
@@ -726,6 +902,18 @@ class MaidWindow(QWidget):
                 self.current_movie.start()
             return
 
+        if self._keyboard_control_mode:
+            self._stop_inactivity_timer(reset_stage=True)
+            self.wander_timer.stop()
+            if self._keyboard_fly_active:
+                if self.current_action != "fly":
+                    self.play_action("fly", force_loop=True)
+            elif int(getattr(self, "_keyboard_move_direction", 0)) != 0:
+                self._ensure_keyboard_move_animation(self._keyboard_move_direction)
+            else:
+                self._ensure_keyboard_stand_animation()
+            return
+
         # 菜单打开期间锁定为 interact，避免动作结束后误回 idle
         if self._is_menu_ui_active():
             self._stop_inactivity_timer(reset_stage=True)
@@ -756,6 +944,9 @@ class MaidWindow(QWidget):
 #--------------------------------待机状态机--------------------------------
     def _on_wander_tick(self):
         if self._edge_hidden:
+            self.wander_timer.stop()
+            return
+        if self._keyboard_control_mode:
             self.wander_timer.stop()
             return
 
@@ -824,7 +1015,7 @@ class MaidWindow(QWidget):
         self._start_inactivity_timer(15000) # 15秒后按待机模式进入下一阶段
 
     def _start_inactivity_timer(self, duration_ms):
-        if self._edge_hidden:
+        if (self._edge_hidden || self._keyboard_control_mode):
             self._inactivity_deadline = None
             self.inactivity_timer.stop()
             return
@@ -850,7 +1041,7 @@ class MaidWindow(QWidget):
             self.inactivity_stage = 0
 
     def _on_inactivity_timeout(self):
-        if self._edge_hidden:
+        if (self._edge_hidden ||self._keyboard_control_mode):
             self._stop_inactivity_timer(reset_stage=True)
             self.wander_timer.stop()
             return
@@ -1155,6 +1346,14 @@ class MaidWindow(QWidget):
             new_x = max_x
             self._fall_drift_speed = -abs(self._fall_drift_speed) * 0.7 - 0.03
 
+        if self._keyboard_control_mode:
+            direction = int(getattr(self, "_keyboard_move_direction", 0))
+            if direction != 0:
+                keyboard_target_x = float(self.x()) + float(self._keyboard_move_step * direction)
+                new_x = min(max(keyboard_target_x, min_x), max_x)
+                self._fall_x = new_x
+                self._fall_drift_speed = 0.0
+
         self._fall_x = min(max(self._fall_x, min_x), max_x)
         self.move(int(round(new_x)), int(round(self._fall_y)))
 
@@ -1177,6 +1376,9 @@ class MaidWindow(QWidget):
             return
 
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._keyboard_control_mode:
+                self.stop_keyboard_control_mode(show_tip=False)
+
             # 当左键点击(准备拖拽或点击)时，如果有气泡菜单则关闭
             if hasattr(self.maid_actions, "circular_menu") and self.maid_actions.circular_menu is not None:
                 if getattr(self.maid_actions.circular_menu, "isVisible", lambda: False)():
@@ -1192,6 +1394,24 @@ class MaidWindow(QWidget):
                 self._stop_inactivity_timer()
               
         elif event.button() == Qt.MouseButton.RightButton:
+            todo_open = bool(getattr(self, "_todo_panel_open", False))
+            controller = getattr(self, "menu_controller", None)
+            if controller is not None and getattr(controller, "is_todo_panel_open", False):
+                todo_open = True
+
+            todo_panel = getattr(self.maid_actions, "todo_panel", None)
+            if todo_panel is not None and bool(getattr(todo_panel, "isVisible", lambda: False)()):
+                todo_open = True
+
+            if todo_open:
+                self.menu_interact_mode = True
+                self._stop_inactivity_timer(reset_stage=True)
+                self.wander_timer.stop()
+                self.play_action("interact", force_loop=True)
+                self.dialogue_system.show_message("待办", "请先点击待办框右上角关闭按钮。")
+                return
+            if self._keyboard_control_mode:
+                self.stop_keyboard_control_mode(show_tip=False)
             self._request_context_menu(event.globalPosition().toPoint(), source="mouse")
 
     def contextMenuEvent(self, event):
@@ -1337,6 +1557,59 @@ class MaidWindow(QWidget):
                 # 只是单击且没有拖动，恢复计时器（如果是从 idle 点下去的）
                 elif self.current_action == "idle" and hasattr(self, 'inactivity_timer'):
                     self._reset_inactivity_timer()
+
+    def keyPressEvent(self, event):
+        if self._keyboard_control_mode:
+            if event.isAutoRepeat():
+                event.accept()
+                return
+
+            key = event.key()
+            if key in (Qt.Key.Key_A, Qt.Key.Key_Left):
+                self._set_keyboard_move_direction(-1)
+                event.accept()
+                return
+            elif key in (Qt.Key.Key_D, Qt.Key.Key_Right):
+                self._set_keyboard_move_direction(1)
+                event.accept()
+                return
+            elif key == Qt.Key.Key_Escape:
+                self.stop_keyboard_control_mode(show_tip=True)
+                event.accept()
+                return
+            elif key == Qt.Key.Key_Space:
+                self._keyboard_fly_active = True
+                if getattr(self, "_is_falling", False):
+                    self._stop_fall()
+                self._move_up_by_keyboard_step()
+                if not self._keyboard_move_timer.isActive():
+                    self._keyboard_move_timer.start(self._keyboard_move_interval_ms)
+                event.accept()
+                return
+
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if self._keyboard_control_mode:
+            if event.isAutoRepeat():
+                event.accept()
+                return
+
+            key = event.key()
+            if key in (Qt.Key.Key_A, Qt.Key.Key_Left, Qt.Key.Key_D, Qt.Key.Key_Right):
+                self._set_keyboard_move_direction(0)
+                event.accept()
+                return
+            if key == Qt.Key.Key_Space:
+                self._keyboard_fly_active = False
+                if not self._is_at_bottom_boundary() and not self._allow_air_interaction():
+                    self._start_fall_to_bottom()
+                elif self._keyboard_move_direction == 0:
+                    self._ensure_keyboard_stand_animation()
+                event.accept()
+                return
+
+        super().keyReleaseEvent(event)
 
     def wheelEvent(self, event):
         if self._edge_hidden:
